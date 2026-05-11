@@ -1,0 +1,20 @@
+services:
+  awanstream:
+    build: .
+    container_name: awanstream
+    restart: unless-stopped
+    ports:
+      - "7575:7575"
+    env_file: .env
+    environment:
+      NODE_ENV: production
+    volumes:
+      - ./db:/app/db
+      - ./logs:/app/logs
+      - ./public/uploads:/app/public/uploads
+    healthcheck:
+      test: ["CMD", "node", "-e", "const http=require('http');http.get('http://localhost:7575/login',(r)=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

@@ -1,0 +1,71 @@
+<%- include('partials/header', {
+  title: 'Playlists',
+  activeNav: 'playlists',
+  pageTitle: 'Playlists',
+  pageSubtitle: 'Group video untuk sequential / 24/7 streaming.',
+  topbarActions: `
+    <button type="button" class="btn btn-primary" data-open-modal="new-playlist">+ New playlist</button>
+  `,
+}) %>
+<%- include('partials/flash', { error, notice }) %>
+
+<% if (playlists.length === 0) { %>
+  <div class="card empty">
+    <p class="muted">Belum ada playlist.</p>
+    <button type="button" class="btn btn-primary" data-open-modal="new-playlist">+ Buat playlist pertama</button>
+  </div>
+<% } else { %>
+  <div class="table-wrap card card-flush">
+    <table class="table">
+      <thead><tr>
+        <th class="col-w-title">Name</th>
+        <th class="col-w-size">Videos</th>
+        <th class="col-w-status">Loop</th>
+        <th class="col-w-date">Created</th>
+        <th class="col-w-actions">Actions</th>
+      </tr></thead>
+      <tbody>
+        <% playlists.forEach(p => { %>
+          <tr>
+            <td class="truncate"><a href="/playlists/<%= p.id %>"><%= p.name %></a></td>
+            <td><%= p.item_count %></td>
+            <td><%= p.loop_playlist ? 'Yes' : 'No' %></td>
+            <td class="col-date small muted"><%= formatTime(p.created_at) %></td>
+            <td class="actions">
+              <a href="/playlists/<%= p.id %>" class="btn btn-link">Edit</a>
+              <form method="POST" action="/playlists/<%= p.id %>/delete" class="inline"
+                    data-confirm="Hapus playlist '<%= p.name %>'?"
+                    data-confirm-title="Hapus playlist"
+                    data-confirm-action="Hapus">
+                <button class="btn btn-danger" type="submit">Delete</button>
+              </form>
+            </td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+<% } %>
+
+<dialog id="new-playlist" class="modal modal-sm">
+  <div class="modal-card">
+    <header class="modal-header">
+      <h2>New playlist</h2>
+      <button type="button" class="modal-close" data-close-modal aria-label="Close">×</button>
+    </header>
+    <form method="POST" action="/playlists">
+      <div class="modal-body">
+        <label>Name <input name="name" required placeholder="My 24/7 playlist"></label>
+        <label class="inline-check">
+          <input type="checkbox" name="loop_playlist" value="1" checked>
+          Loop (setelah video terakhir, mulai dari awal)
+        </label>
+      </div>
+      <footer class="modal-footer">
+        <button type="button" class="btn" data-close-modal>Batal</button>
+        <button type="submit" class="btn btn-primary">Simpan</button>
+      </footer>
+    </form>
+  </div>
+</dialog>
+<%- include('partials/footer') %>

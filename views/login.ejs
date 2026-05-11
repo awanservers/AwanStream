@@ -1,0 +1,19 @@
+<%- include('partials/header', { title: 'Login', currentUser: null }) %>
+<div class="auth-card">
+  <h1>AwanStream</h1>
+  <p class="muted">Sign in to continue</p>
+  <% if (error) { %><div class="alert alert-error"><%= error %></div><% } %>
+  <form method="POST" action="/login">
+    <label>
+      Username
+      <input name="username" required autofocus />
+    </label>
+    <label>
+      Password
+      <input type="password" name="password" required />
+    </label>
+    <button class="btn btn-primary" type="submit">Login</button>
+  </form>
+  <p class="muted small">First time? Run <code>node reset-password.js</code> to create the admin user.</p>
+</div>
+<%- include('partials/footer') %>

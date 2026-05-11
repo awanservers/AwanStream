@@ -1,0 +1,174 @@
+<%- include('partials/header', {
+  title: 'Dashboard',
+  activeNav: 'dashboard',
+  pageTitle: 'Dashboard',
+  pageSubtitle: 'Ringkasan aktivitas streaming kamu.',
+}) %>
+
+<div class="stat-grid">
+
+  <a href="/videos" class="stat-card">
+    <div class="stat-icon stat-icon-blue">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="2" y="5" width="14" height="14" rx="2"/><path d="M22 7l-6 5 6 5V7z"/>
+      </svg>
+    </div>
+    <div class="stat-body">
+      <div class="stat-num"><%= videoCount %></div>
+      <div class="stat-label">Videos</div>
+      <div class="stat-sub"><%= readyCount %> ready</div>
+    </div>
+  </a>
+
+  <a href="/streams" class="stat-card">
+    <div class="stat-icon stat-icon-purple">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M5 12a7 7 0 0 1 14 0"/><path d="M2 12a10 10 0 0 1 20 0"/><circle cx="12" cy="12" r="2"/>
+      </svg>
+    </div>
+    <div class="stat-body">
+      <div class="stat-num"><%= streamCount %></div>
+      <div class="stat-label">Streams</div>
+      <div class="stat-sub"><%= runningCount > 0 ? runningCount + ' running' : 'none running' %></div>
+    </div>
+    <% if (runningCount > 0) { %>
+      <span class="stat-live">LIVE</span>
+    <% } %>
+  </a>
+
+  <a href="/schedules" class="stat-card">
+    <div class="stat-icon stat-icon-green">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="4" width="18" height="17" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>
+      </svg>
+    </div>
+    <div class="stat-body">
+      <div class="stat-num"><%= pendingSchedules %></div>
+      <div class="stat-label">Schedules</div>
+      <div class="stat-sub">
+        <% if (nextSchedule) { %>
+          next: <%= formatTime(nextSchedule.start_at) %>
+        <% } else { %>
+          no pending
+        <% } %>
+      </div>
+    </div>
+  </a>
+
+  <div class="stat-card stat-card-plain">
+    <div class="stat-icon stat-icon-orange">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3"/>
+      </svg>
+    </div>
+    <div class="stat-body">
+      <div class="stat-num">
+        <% const gb = totalBytes / (1024*1024*1024); %>
+        <% if (gb >= 1) { %><%= gb.toFixed(1) %> GB
+        <% } else { %><%= (totalBytes / (1024*1024)).toFixed(0) %> MB<% } %>
+      </div>
+      <div class="stat-label">Storage</div>
+      <div class="stat-sub"><%= videoCount %> file</div>
+    </div>
+  </div>
+
+</div>
+
+<h2 class="section-heading" style="margin-top:1.5rem">System</h2>
+<div class="stat-grid" style="grid-template-columns: repeat(3, 1fr)">
+  <div class="card stat-card stat-card-plain">
+    <div class="stat-icon stat-icon-blue">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h6v6H9z"/></svg>
+    </div>
+    <div class="stat-body">
+      <div class="stat-num" id="sys-cpu"><%= system.cpuPercent %>%</div>
+      <div class="stat-label">CPU</div>
+      <div class="stat-sub" id="sys-cpu-sub"><%= system.cpuCount %> cores · load <%= system.loadAvg[0].toFixed(2) %></div>
+    </div>
+  </div>
+  <div class="card stat-card stat-card-plain">
+    <div class="stat-icon stat-icon-purple">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 20h20"/><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+    </div>
+    <div class="stat-body">
+      <div class="stat-num" id="sys-mem"><%= system.memPercent %>%</div>
+      <div class="stat-label">Memory</div>
+      <div class="stat-sub" id="sys-mem-sub"><%= (system.usedMem / (1024*1024*1024)).toFixed(1) %> / <%= (system.totalMem / (1024*1024*1024)).toFixed(1) %> GB</div>
+    </div>
+  </div>
+  <div class="card stat-card stat-card-plain">
+    <div class="stat-icon stat-icon-green">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+    </div>
+    <div class="stat-body">
+      <div class="stat-num" id="sys-uptime"><%
+        const d = Math.floor(system.uptime / 86400);
+        const h = Math.floor((system.uptime % 86400) / 3600);
+        const m = Math.floor((system.uptime % 3600) / 60);
+      %><%= d > 0 ? d + 'd ' : '' %><%= h %>h <%= m %>m</div>
+      <div class="stat-label">Uptime</div>
+      <div class="stat-sub">server</div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  function fmtUptime(s) {
+    const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
+    return (d > 0 ? d + 'd ' : '') + h + 'h ' + m + 'm';
+  }
+  async function poll() {
+    try {
+      const r = await fetch('/api/system', { cache: 'no-store' });
+      if (!r.ok) return;
+      const d = await r.json();
+      document.getElementById('sys-cpu').textContent = d.cpuPercent + '%';
+      document.getElementById('sys-cpu-sub').textContent = d.cpuCount + ' cores · load ' + d.loadAvg[0].toFixed(2);
+      document.getElementById('sys-mem').textContent = d.memPercent + '%';
+      document.getElementById('sys-mem-sub').textContent = (d.usedMem / (1024*1024*1024)).toFixed(1) + ' / ' + (d.totalMem / (1024*1024*1024)).toFixed(1) + ' GB';
+      document.getElementById('sys-uptime').textContent = fmtUptime(d.uptime);
+    } catch (_) {}
+  }
+  setInterval(poll, 3000);
+})();
+</script>
+
+<h2 class="section-heading" style="margin-top:1.5rem">Recent streams</h2>
+<% if (recentStreams.length === 0) { %>
+  <div class="card empty">
+    <p class="muted">Belum ada stream. <a href="/streams">Buat sekarang</a>.</p>
+  </div>
+<% } else { %>
+  <div class="table-wrap card card-flush">
+    <table class="table">
+      <thead><tr>
+        <th class="col-w-title">Name</th>
+        <th class="col-w-title">Video</th>
+        <th class="col-w-platform">Platform</th>
+        <th class="col-w-status">Status</th>
+        <th class="col-w-date">Last run</th>
+      </tr></thead>
+      <tbody>
+        <% recentStreams.forEach(s => { %>
+          <tr>
+            <td class="truncate" title="<%= s.name %>"><%= s.name %></td>
+            <td class="truncate" title="<%= s.video_title || '(deleted)' %>"><%= s.video_title || '(deleted)' %></td>
+            <td><%= s.platform %></td>
+            <td><span class="badge badge-<%= s.status %>"><%= s.status %></span></td>
+            <td class="col-date small muted">
+              <% if (s.status === 'running') { %>
+                started <%= formatTime(s.started_at) %>
+              <% } else if (s.stopped_at) { %>
+                <%= formatTime(s.stopped_at) %>
+              <% } else { %>
+                -
+              <% } %>
+            </td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+<% } %>
+<%- include('partials/footer') %>
