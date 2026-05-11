@@ -1,17 +1,25 @@
-FROM node:20-bookworm-slim
+# ─── Stage 1: Build native dependencies ─────────────────────────────────────
+FROM node:20-alpine AS builder
 
-# Install ffmpeg + build tools for better-sqlite3 native addon
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg python3 make g++ \
-    && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache python3 make g++
 
 WORKDIR /app
 
-# Install dependencies (layer cached unless package*.json changes)
 COPY package*.json ./
-RUN npm ci --omit=dev && npm cache clean --force
+RUN npm ci --omit=dev
+
+# ─── Stage 2: Production image ──────────────────────────────────────────────
+FROM node:20-alpine
+
+RUN apk add --no-cache ffmpeg
+
+WORKDIR /app
+
+# Copy compiled node_modules from builder (includes native better-sqlite3)
+COPY --from=builder /app/node_modules ./node_modules
 
 # Copy application code
+COPY package*.json ./
 COPY . .
 
 # Create runtime directories
