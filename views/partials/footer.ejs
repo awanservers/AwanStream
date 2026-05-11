@@ -1,0 +1,141 @@
+<% if (typeof currentUser !== 'undefined' && currentUser) { %>
+    </main>
+  </div>
+
+  <!-- Global confirm modal, reused by any form with data-confirm -->
+  <dialog id="confirm-dialog" class="modal modal-sm">
+    <div class="modal-card">
+      <header class="modal-header">
+        <h2 id="confirm-title">Konfirmasi</h2>
+        <button type="button" class="modal-close" data-close-modal aria-label="Close">×</button>
+      </header>
+      <div class="modal-body">
+        <p id="confirm-message" class="muted">Lanjutkan aksi ini?</p>
+      </div>
+      <footer class="modal-footer">
+        <button type="button" class="btn" data-close-modal>Batal</button>
+        <button type="button" class="btn btn-danger" id="confirm-ok">Lanjutkan</button>
+      </footer>
+    </div>
+  </dialog>
+
+  <!-- Toast container for flash messages (rendered by EJS) -->
+  <div id="toast-root" class="toast-root" aria-live="polite"></div>
+
+  <script>
+    // Modal controller. Wire up to any <dialog id="..."> using buttons with
+    // data-open-modal="<id>" and data-close-modal. Emits a modal:before-open
+    // custom event so pages can populate form state before the modal shows.
+    (function () {
+      function open(id, trigger) {
+        const dlg = document.getElementById(id);
+        if (!dlg || typeof dlg.showModal !== 'function') return;
+        dlg.dispatchEvent(new CustomEvent('modal:before-open', {
+          detail: { id, trigger }, bubbles: true,
+        }));
+        document.dispatchEvent(new CustomEvent('modal:before-open', {
+          detail: { id, trigger },
+        }));
+        dlg.showModal();
+      }
+      function close(dlg) {
+        if (dlg && typeof dlg.close === 'function') dlg.close();
+      }
+
+      document.addEventListener('click', (e) => {
+        const openBtn = e.target.closest('[data-open-modal]');
+        if (openBtn) {
+          e.preventDefault();
+          open(openBtn.dataset.openModal, openBtn);
+          return;
+        }
+        const closeBtn = e.target.closest('[data-close-modal]');
+        if (closeBtn) {
+          e.preventDefault();
+          close(closeBtn.closest('dialog'));
+          return;
+        }
+        if (e.target.matches('dialog.modal')) close(e.target);
+      });
+    })();
+
+    // Custom confirm — replaces native window.confirm() on forms that opt-in via
+    //   <form data-confirm="message" data-confirm-action="Delete">.
+    (function () {
+      const dlg = document.getElementById('confirm-dialog');
+      const msg = document.getElementById('confirm-message');
+      const title = document.getElementById('confirm-title');
+      const ok = document.getElementById('confirm-ok');
+      let pending = null; // form waiting to be submitted on confirm
+
+      document.addEventListener('submit', (e) => {
+        const form = e.target.closest('form[data-confirm]');
+        if (!form || form.dataset._confirmed === '1') return;
+        e.preventDefault();
+        pending = form;
+        title.textContent = form.dataset.confirmTitle || 'Konfirmasi';
+        msg.textContent = form.dataset.confirm || 'Lanjutkan aksi ini?';
+        ok.textContent = form.dataset.confirmAction || 'Lanjutkan';
+        ok.className = 'btn ' + (form.dataset.confirmVariant === 'primary' ? 'btn-primary' : 'btn-danger');
+        dlg.showModal();
+      });
+
+      ok.addEventListener('click', () => {
+        if (!pending) return;
+        pending.dataset._confirmed = '1';
+        dlg.close();
+        // HTMLFormElement.requestSubmit triggers validation + proper submit event.
+        pending.requestSubmit();
+        pending = null;
+      });
+
+      dlg.addEventListener('close', () => {
+        if (pending) {
+          // User cancelled; reset marker so future submits still ask.
+          delete pending.dataset._confirmed;
+          pending = null;
+        }
+      });
+    })();
+
+    // Toast auto-dismiss for flash messages shown via partials/flash.ejs (class .alert).
+    // Also strips ?notice=/?error= from the URL so refreshing the page doesn't
+    // re-show the same toast over and over.
+    (function () {
+      const root = document.getElementById('toast-root');
+      const toasts = document.querySelectorAll('.alert[data-toast]');
+      toasts.forEach((el) => {
+        root.appendChild(el);
+        setTimeout(() => {
+          el.classList.add('toast-fade');
+          setTimeout(() => el.remove(), 300);
+        }, 4000);
+      });
+      if (toasts.length > 0 && window.history && window.history.replaceState) {
+        const url = new URL(window.location.href);
+        url.searchParams.delete('notice');
+        url.searchParams.delete('error');
+        window.history.replaceState({}, '', url.pathname + (url.search ? url.search : '') + url.hash);
+      }
+    })();
+
+    // Defensive: make sure no dialog is stuck "open" after navigation / bfcache.
+    // Some browsers restore dialog state across refreshes otherwise.
+    (function () {
+      document.querySelectorAll('dialog[open]').forEach((d) => {
+        try { d.close(); } catch (_) {}
+      });
+      window.addEventListener('pageshow', (e) => {
+        if (e.persisted) {
+          document.querySelectorAll('dialog[open]').forEach((d) => {
+            try { d.close(); } catch (_) {}
+          });
+        }
+      });
+    })();
+  </script>
+<% } else { %>
+  </main>
+<% } %>
+</body>
+</html>

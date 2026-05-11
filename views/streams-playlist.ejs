@@ -1,0 +1,121 @@
+<%- include('partials/header', {
+  title: 'Playlist Streams',
+  activeNav: 'streams-playlist',
+  pageTitle: 'Streams — Playlist',
+  pageSubtitle: 'Stream playlist video secara berurutan (sequential / 24/7).',
+  topbarActions: `
+    <button type="button" class="btn btn-primary" data-open-modal="new-stream-pl">+ New stream</button>
+  `,
+}) %>
+<%- include('partials/flash', { error, notice }) %>
+
+<% if (streams.length === 0) { %>
+  <div class="card empty">
+    <p class="muted">Belum ada stream playlist.</p>
+    <button type="button" class="btn btn-primary" data-open-modal="new-stream-pl">+ Buat stream pertama</button>
+  </div>
+<% } else { %>
+  <div class="table-wrap card card-flush">
+    <table class="table">
+      <thead><tr>
+        <th class="col-w-title">Name</th>
+        <th class="col-w-title">Playlist</th>
+        <th class="col-w-title">Now playing</th>
+        <th class="col-w-platform">Platform</th>
+        <th class="col-w-status">Status</th>
+        <th class="col-w-actions">Actions</th>
+      </tr></thead>
+      <tbody>
+        <% streams.forEach(s => { %>
+          <tr>
+            <td class="truncate" title="<%= s.name %>"><%= s.name %></td>
+            <td class="truncate" title="<%= s.playlist_name || '-' %>"><%= s.playlist_name || '-' %></td>
+            <td class="truncate small muted" title="<%= s.video_title || '-' %>"><%= s.video_title || '-' %></td>
+            <td><%= s.platform %></td>
+            <td>
+              <span class="badge badge-<%= s.status %>"><%= s.status %></span>
+              <% if (s.last_error) { %><div class="small muted"><%= s.last_error %></div><% } %>
+            </td>
+            <td class="actions">
+              <% if (s.status === 'running') { %>
+                <form method="POST" action="/streams/<%= s.id %>/stop" class="inline">
+                  <button class="btn btn-warn" type="submit">Stop</button>
+                </form>
+              <% } else { %>
+                <form method="POST" action="/streams/<%= s.id %>/start" class="inline">
+                  <button class="btn btn-primary" type="submit">Start</button>
+                </form>
+              <% } %>
+              <a class="btn btn-link" href="/streams/<%= s.id %>/log" target="_blank">Log</a>
+              <form method="POST" action="/streams/<%= s.id %>/delete" class="inline"
+                    data-confirm="Hapus stream '<%= s.name %>'?"
+                    data-confirm-title="Hapus stream"
+                    data-confirm-action="Hapus">
+                <button class="btn btn-danger" type="submit">Delete</button>
+              </form>
+            </td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+<% } %>
+
+<dialog id="new-stream-pl" class="modal">
+  <div class="modal-card">
+    <header class="modal-header">
+      <h2>New stream — Playlist</h2>
+      <button type="button" class="modal-close" data-close-modal aria-label="Close">×</button>
+    </header>
+    <% if (playlists.length === 0) { %>
+      <div class="modal-body">
+        <p class="muted">Belum ada playlist. <a href="/playlists">Buat playlist</a> dulu, lalu tambahkan video ke dalamnya.</p>
+      </div>
+      <footer class="modal-footer">
+        <a href="/playlists" class="btn btn-primary">Ke Playlists</a>
+        <button type="button" class="btn" data-close-modal>Tutup</button>
+      </footer>
+    <% } else { %>
+      <form method="POST" action="/streams">
+        <input type="hidden" name="re_encode" value="0">
+        <div class="modal-body">
+          <div class="grid-2">
+            <label>Name <input name="name" required placeholder="24/7 Lofi Stream"></label>
+            <label>Playlist
+              <select name="playlist_id" required>
+                <% playlists.forEach(p => { %>
+                  <option value="<%= p.id %>"><%= p.name %> (<%= p.item_count %> videos)</option>
+                <% }) %>
+              </select>
+            </label>
+            <label>Platform
+              <select name="platform" id="platform-select-pl">
+                <% Object.keys(presets).forEach(p => { %>
+                  <option value="<%= p %>" data-url="<%= presets[p] %>"><%= p %></option>
+                <% }) %>
+              </select>
+            </label>
+            <label>RTMP URL <input name="rtmp_url" id="rtmp-url-pl" required placeholder="rtmp://..."></label>
+            <label class="full">Stream key <input name="stream_key" required placeholder="xxxx-xxxx-xxxx"></label>
+            <label class="full inline-check">
+              <input type="checkbox" name="loop_video" value="1" checked>
+              Loop playlist (setelah video terakhir, mulai dari awal)
+            </label>
+          </div>
+        </div>
+        <footer class="modal-footer">
+          <button type="button" class="btn" data-close-modal>Batal</button>
+          <button type="submit" class="btn btn-primary">Simpan</button>
+        </footer>
+      </form>
+      <script>
+        (function(){
+          const sel = document.getElementById('platform-select-pl');
+          const url = document.getElementById('rtmp-url-pl');
+          if (sel && url) sel.addEventListener('change', () => { const u = sel.options[sel.selectedIndex].dataset.url; if (u) url.value = u; });
+        })();
+      </script>
+    <% } %>
+  </div>
+</dialog>
+<%- include('partials/footer') %>

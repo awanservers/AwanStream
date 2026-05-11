@@ -1,0 +1,555 @@
+<%- include('partials/header', {
+  title: 'Videos',
+  activeNav: 'videos',
+  pageTitle: 'Videos',
+  pageSubtitle: 'Upload, prepare, dan kelola library video.',
+  topbarActions: `
+    <button type="button" class="btn btn-primary" data-open-modal="upload">+ Upload video</button>
+  `,
+}) %>
+<%- include('partials/flash', { error, notice }) %>
+
+<% if (videos.length === 0) { %>
+  <div class="card empty">
+    <p class="muted">Belum ada video.</p>
+    <button type="button" class="btn btn-primary" data-open-modal="upload">+ Upload pertama</button>
+  </div>
+<% } else { %>
+  <div class="table-wrap card card-flush">
+    <table class="table">
+      <thead><tr>
+        <th class="col-w-title">Title</th>
+        <th class="col-w-file">File</th>
+        <th class="col-w-size">Size</th>
+        <th class="col-w-status">Status</th>
+        <th class="col-w-date">Uploaded</th>
+        <th class="col-w-actions">Actions</th>
+      </tr></thead>
+      <tbody>
+        <% videos.forEach(v => { %>
+          <tr>
+            <td class="clamp-2" title="<%= v.title %>"><%= v.title %></td>
+            <td class="mono truncate" title="<%= v.filename %>"><%= v.filename %></td>
+            <td class="col-size"><%= (v.size_bytes / (1024*1024)).toFixed(1) %> MB</td>
+            <td>
+              <% if (v.status === 'ready') { %>
+                <span class="badge badge-running">ready</span>
+              <% } else if (v.status === 'downloading') { %>
+                <span class="badge badge-idle">downloading…</span>
+              <% } else if (v.status === 'transcoding') { %>
+                <button type="button"
+                        class="badge badge-idle badge-btn"
+                        data-open-modal="job-detail"
+                        data-video-id="<%= v.id %>"
+                        data-video-title="<%= v.title %>"
+                        title="Klik untuk detail">
+                  transcoding <span data-progress-badge-pct="<%= v.id %>">…</span>
+                </button>
+              <% } else if (v.status === 'error') { %>
+                <button type="button"
+                        class="badge badge-error badge-btn"
+                        data-open-modal="job-detail"
+                        data-video-id="<%= v.id %>"
+                        data-video-title="<%= v.title %>"
+                        title="Lihat log error">
+                  error
+                </button>
+              <% } else { %>
+                <span class="badge badge-idle"><%= v.status %></span>
+              <% } %>
+            </td>
+            <td class="col-date small muted"><%= formatTime(v.created_at) %></td>
+            <td class="actions">
+              <% if (v.status === 'transcoding') { %>
+                <button type="button" class="btn btn-link"
+                        data-open-modal="job-detail"
+                        data-video-id="<%= v.id %>"
+                        data-video-title="<%= v.title %>">Details</button>
+              <% } else if (v.status === 'ready') { %>
+                <button type="button" class="btn btn-link"
+                        data-open-modal="prepare"
+                        data-video-id="<%= v.id %>"
+                        data-video-title="<%= v.title %>"
+                        data-src-width="<%= v.src_width || '' %>"
+                        data-src-height="<%= v.src_height || '' %>"
+                        data-src-fps="<%= v.src_fps || '' %>"
+                        title="Re-encode dengan preset lain">Re-Prepare</button>
+              <% } else { %>
+                <button type="button" class="btn btn-primary"
+                        data-open-modal="prepare"
+                        data-video-id="<%= v.id %>"
+                        data-video-title="<%= v.title %>"
+                        data-src-width="<%= v.src_width || '' %>"
+                        data-src-height="<%= v.src_height || '' %>"
+                        data-src-fps="<%= v.src_fps || '' %>">
+                  <%= v.status === 'error' ? 'Retry Prepare' : 'Prepare' %>
+                </button>
+              <% } %>
+              <form method="POST" action="/videos/<%= v.id %>/delete" class="inline"
+                    data-confirm="Hapus video '<%= v.title %>'? File di disk akan ikut terhapus."
+                    data-confirm-title="Hapus video"
+                    data-confirm-action="Hapus">
+                <button class="btn btn-danger" type="submit">Delete</button>
+              </form>
+            </td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+<% } %>
+
+<dialog id="upload" class="modal">
+  <div class="modal-card">
+    <header class="modal-header">
+      <h2>Add video</h2>
+      <button type="button" class="modal-close" data-close-modal aria-label="Close">×</button>
+    </header>
+    <div class="modal-tabs">
+      <button type="button" class="tab active" data-tab="tab-upload">From PC</button>
+      <button type="button" class="tab" data-tab="tab-url">From URL</button>
+    </div>
+    <div id="tab-upload" class="tab-panel active">
+      <form method="POST" action="/videos/upload" enctype="multipart/form-data" id="upload-form">
+        <div class="modal-body">
+          <label>Title <input name="title" placeholder="(optional, pakai nama file kalau kosong)"></label>
+          <label>File <input type="file" name="video" accept="video/*" required></label>
+          <p class="muted small">
+            Allowed formats: mp4, mkv, mov, flv, ts, webm. Max 5 GB.
+          </p>
+          <div id="upload-progress" class="progress" style="display:none">
+            <div class="progress-bar" style="width:0%"></div>
+            <div class="progress-label small">starting…</div>
+          </div>
+        </div>
+        <footer class="modal-footer">
+          <button type="button" class="btn" data-close-modal id="upload-cancel">Batal</button>
+          <button type="submit" class="btn btn-primary" id="upload-submit">Upload</button>
+        </footer>
+      </form>
+    </div>
+    <div id="tab-url" class="tab-panel">
+      <form method="POST" action="/videos/import-url" id="import-form">
+        <div class="modal-body">
+          <label>URL
+            <input name="url" type="url" required placeholder="https://drive.google.com/file/d/... atau link lain">
+          </label>
+          <label>Title <input name="title" placeholder="(optional, auto-detect dari source)"></label>
+          <p class="muted small">
+            Supported: Google Drive, Mega, MediaFire, atau direct link ke file video.
+          </p>
+        </div>
+        <footer class="modal-footer">
+          <button type="button" class="btn" data-close-modal>Batal</button>
+          <button type="submit" class="btn btn-primary">Download</button>
+        </footer>
+      </form>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="prepare" class="modal">
+  <div class="modal-card">
+    <header class="modal-header">
+      <h2>Prepare video</h2>
+      <button type="button" class="modal-close" data-close-modal aria-label="Close">×</button>
+    </header>
+    <form method="POST" id="prepare-form">
+      <div class="modal-body">
+        <p class="muted small" id="prepare-desc">Transcode <strong id="prepare-title"></strong> jadi stream-ready (H.264 + AAC, GOP 2 detik). File original akan diganti.</p>
+        <div class="src-info" id="prepare-src-info" style="display:none">
+          <span class="badge badge-idle" id="prepare-src-badge"></span>
+          <span class="small muted" id="prepare-src-note"></span>
+        </div>
+        <div class="grid-2">
+          <label>Resolution / FPS
+            <select name="preset">
+              <% Object.keys(presets).forEach(p => { %>
+                <option value="<%= p %>" <%= p === '1080p30' ? 'selected' : '' %>><%= p %></option>
+              <% }) %>
+            </select>
+          </label>
+          <label>x264 preset
+            <select name="x264_preset" title="Trade-off antara kecepatan encode dan ukuran file">
+              <option value="ultrafast">ultrafast</option>
+              <option value="superfast">superfast</option>
+              <option value="veryfast">veryfast</option>
+              <option value="faster">faster</option>
+              <option value="fast">fast</option>
+              <option value="medium" selected>medium (recommended)</option>
+              <option value="slow">slow</option>
+            </select>
+          </label>
+        </div>
+      </div>
+      <footer class="modal-footer">
+        <button type="button" class="btn" data-close-modal>Batal</button>
+        <button type="submit" class="btn btn-primary">Mulai Prepare</button>
+      </footer>
+    </form>
+  </div>
+</dialog>
+
+<dialog id="job-detail" class="modal modal-lg">
+  <div class="modal-card">
+    <header class="modal-header">
+      <h2 id="job-title">Transcode detail</h2>
+      <button type="button" class="modal-close" data-close-modal aria-label="Close">×</button>
+    </header>
+    <div class="modal-body">
+      <div class="job-status">
+        <span class="badge" id="job-badge">loading</span>
+        <span class="small muted" id="job-eta"></span>
+      </div>
+      <div class="progress progress-lg">
+        <div class="progress-bar" id="job-bar" style="width:0%"></div>
+        <div class="progress-label" id="job-label">starting…</div>
+      </div>
+      <div class="job-stats" id="job-stats">
+        <span><span class="muted">time</span> <span id="job-time">-</span></span>
+        <span><span class="muted">speed</span> <span id="job-speed">-</span></span>
+        <span><span class="muted">fps</span> <span id="job-fps">-</span></span>
+        <span><span class="muted">eta</span> <span id="job-eta2">-</span></span>
+      </div>
+      <h3 class="log-heading">FFmpeg log <span class="small muted">(last 60 lines)</span></h3>
+      <pre class="log-box" id="job-log">(belum ada log)</pre>
+    </div>
+    <footer class="modal-footer">
+      <form method="POST" id="job-cancel-form" class="inline" style="display:none">
+        <button class="btn btn-warn" type="submit">Cancel transcode</button>
+      </form>
+      <form method="POST" id="job-retry-form" class="inline" style="display:none"
+            data-confirm="Mulai Prepare ulang? File sumber akan ditimpa."
+            data-confirm-title="Retry Prepare"
+            data-confirm-action="Retry">
+        <input type="hidden" name="preset" value="1080p30">
+        <input type="hidden" name="x264_preset" value="medium">
+        <button class="btn btn-primary" type="submit">Retry Prepare</button>
+      </form>
+      <button type="button" class="btn" data-close-modal>Close</button>
+    </footer>
+  </div>
+</dialog>
+
+<script>
+// Fill Prepare form target before opening.
+document.addEventListener('modal:before-open', (e) => {
+  if (e.detail.id !== 'prepare') return;
+  const btn = e.detail.trigger;
+  if (!btn) return;
+  const id = btn.dataset.videoId;
+  const title = btn.dataset.videoTitle || '';
+  const isReprepare = btn.textContent.trim().toLowerCase().startsWith('re');
+  document.getElementById('prepare-form').action = '/videos/' + id + '/prepare';
+  document.getElementById('prepare-title').textContent = title;
+  document.getElementById('prepare-desc').innerHTML = isReprepare
+    ? 'Re-encode <strong>' + title + '</strong> ke preset baru. File yang sudah ready sekarang akan <strong>ditimpa</strong>. Stream yang lagi running akan error.'
+    : 'Transcode <strong>' + title + '</strong> jadi stream-ready (H.264 + AAC, GOP 2 detik). File original akan diganti.';
+
+  // Auto-select best matching preset based on source resolution/fps.
+  const w = Number(btn.dataset.srcWidth) || 0;
+  const h = Number(btn.dataset.srcHeight) || 0;
+  const fps = Number(btn.dataset.srcFps) || 0;
+  const srcInfo = document.getElementById('prepare-src-info');
+  const srcBadge = document.getElementById('prepare-src-badge');
+  const srcNote = document.getElementById('prepare-src-note');
+  const presetSel = document.querySelector('#prepare-form select[name="preset"]');
+
+  if (w && h) {
+    srcBadge.textContent = w + '×' + h + (fps ? ' @ ' + Math.round(fps) + 'fps' : '');
+    srcInfo.style.display = 'flex';
+
+    // Pick the best matching preset: same or lower resolution, same or lower fps.
+    // Priority: exact match > lower res > lowest available.
+    const PRESETS = [
+      { key: '1080p60', w: 1920, h: 1080, fps: 60 },
+      { key: '1080p30', w: 1920, h: 1080, fps: 30 },
+      { key: '720p60',  w: 1280, h: 720,  fps: 60 },
+      { key: '720p30',  w: 1280, h: 720,  fps: 30 },
+    ];
+    // Find best: largest preset that is <= source dimensions.
+    let best = null;
+    for (const p of PRESETS) {
+      if (p.w <= w && p.h <= h) {
+        // Prefer fps match; if source fps is close to preset fps, prefer it.
+        if (!best) { best = p; continue; }
+        const fpsDiff = Math.abs(p.fps - fps);
+        const bestFpsDiff = Math.abs(best.fps - fps);
+        if (fpsDiff < bestFpsDiff) best = p;
+        else if (fpsDiff === bestFpsDiff && p.w > best.w) best = p;
+      }
+    }
+    if (!best) best = PRESETS[PRESETS.length - 1]; // fallback to lowest
+
+    if (presetSel) {
+      presetSel.value = best.key;
+    }
+
+    // Update note based on currently selected preset (called on open + on change).
+    function updateNote() {
+      const selected = PRESETS.find(p => p.key === presetSel.value);
+      if (!selected) { srcNote.textContent = ''; return; }
+      const isExact = selected.w === w && selected.h === h;
+      const isFpsMatch = fps && Math.abs(selected.fps - fps) < 2;
+      if (isExact && isFpsMatch) {
+        srcNote.textContent = '✓ Preset cocok dengan source';
+        srcNote.style.color = 'var(--ok)';
+      } else if (selected.w > w || selected.h > h) {
+        srcNote.textContent = '⚠ Upscale dari source — tidak disarankan';
+        srcNote.style.color = 'var(--warn)';
+      } else if (isExact && selected.fps > fps) {
+        srcNote.textContent = '⚠ Source ' + Math.round(fps) + 'fps → ' + selected.fps + 'fps (frame duplikat, tidak tambah kualitas)';
+        srcNote.style.color = 'var(--warn)';
+      } else if (isExact && selected.fps < fps) {
+        srcNote.textContent = 'Source ' + Math.round(fps) + 'fps → ' + selected.fps + 'fps (frame di-drop)';
+        srcNote.style.color = 'var(--muted)';
+      } else {
+        srcNote.textContent = 'Downscale ke ' + selected.key + ' dari source ' + w + '×' + h;
+        srcNote.style.color = 'var(--muted)';
+      }
+    }
+
+    updateNote();
+    // Remove old listener if modal was opened before, then re-attach.
+    presetSel.removeEventListener('change', presetSel._noteListener);
+    presetSel._noteListener = updateNote;
+    presetSel.addEventListener('change', updateNote);
+  } else {
+    srcInfo.style.display = 'none';
+  }
+});
+
+// Upload with progress bar (unchanged).
+(function () {
+  // Tab switching for upload modal.
+  const tabs = document.querySelectorAll('.modal-tabs .tab');
+  tabs.forEach((tab) => {
+    tab.addEventListener('click', () => {
+      const target = tab.dataset.tab;
+      tab.closest('.modal-card').querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+      tab.closest('.modal-tabs').querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      const panel = document.getElementById(target);
+      if (panel) panel.classList.add('active');
+    });
+  });
+
+  const form = document.getElementById('upload-form');
+  if (!form) return;
+  const dlg = document.getElementById('upload');
+  const progress = document.getElementById('upload-progress');
+  const bar = progress.querySelector('.progress-bar');
+  const label = progress.querySelector('.progress-label');
+  const submitBtn = document.getElementById('upload-submit');
+  const cancelBtn = document.getElementById('upload-cancel');
+
+  function fmtBytes(n) {
+    if (n < 1024) return n + ' B';
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+    if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + ' MB';
+    return (n / 1024 / 1024 / 1024).toFixed(2) + ' GB';
+  }
+
+  let xhr = null;
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const fileInput = form.querySelector('input[type=file]');
+    if (!fileInput.files || fileInput.files.length === 0) return;
+    const data = new FormData(form);
+    xhr = new XMLHttpRequest();
+    xhr.open('POST', form.action);
+    progress.style.display = 'block';
+    bar.style.width = '0%';
+    label.textContent = 'preparing…';
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Uploading…';
+    cancelBtn.textContent = 'Batalkan upload';
+    const started = Date.now();
+    xhr.upload.onprogress = (ev) => {
+      if (!ev.lengthComputable) return;
+      const pct = Math.min(100, Math.round((ev.loaded / ev.total) * 100));
+      bar.style.width = pct + '%';
+      const elapsed = (Date.now() - started) / 1000;
+      const speed = ev.loaded / Math.max(1, elapsed);
+      label.textContent = [pct + '%', fmtBytes(ev.loaded) + ' / ' + fmtBytes(ev.total), fmtBytes(speed) + '/s'].join(' · ');
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 400) {
+        label.textContent = 'done, reloading…';
+        // Explicitly close the dialog before navigation so browsers don't
+        // try to restore the "open" state when the new page loads.
+        try { dlg.close(); } catch (_) {}
+        window.location.href = xhr.responseURL || '/videos';
+      } else {
+        label.textContent = 'upload failed (' + xhr.status + ')';
+        submitBtn.disabled = false; submitBtn.textContent = 'Upload'; cancelBtn.textContent = 'Batal';
+      }
+    };
+    xhr.onerror = () => { label.textContent = 'network error, coba lagi'; submitBtn.disabled = false; submitBtn.textContent = 'Upload'; cancelBtn.textContent = 'Batal'; };
+    xhr.onabort = () => { label.textContent = 'upload dibatalkan'; bar.style.width = '0%'; submitBtn.disabled = false; submitBtn.textContent = 'Upload'; cancelBtn.textContent = 'Batal'; };
+    xhr.send(data);
+  });
+  cancelBtn.addEventListener('click', (e) => {
+    if (xhr && xhr.readyState !== XMLHttpRequest.DONE) {
+      e.preventDefault(); e.stopPropagation();
+      xhr.abort(); xhr = null;
+    }
+  }, true);
+  dlg.addEventListener('modal:before-open', () => {
+    progress.style.display = 'none'; bar.style.width = '0%'; label.textContent = 'starting…';
+    submitBtn.disabled = false; submitBtn.textContent = 'Upload'; cancelBtn.textContent = 'Batal';
+    form.reset();
+  });
+})();
+
+// ----- Job detail modal (transcoding progress + log) -----
+(function () {
+  const dlg = document.getElementById('job-detail');
+  if (!dlg) return;
+
+  const titleEl = document.getElementById('job-title');
+  const badgeEl = document.getElementById('job-badge');
+  const etaEl = document.getElementById('job-eta');
+  const barEl = document.getElementById('job-bar');
+  const labelEl = document.getElementById('job-label');
+  const timeEl = document.getElementById('job-time');
+  const speedEl = document.getElementById('job-speed');
+  const fpsEl = document.getElementById('job-fps');
+  const eta2El = document.getElementById('job-eta2');
+  const logEl = document.getElementById('job-log');
+  const cancelForm = document.getElementById('job-cancel-form');
+  const retryForm = document.getElementById('job-retry-form');
+
+  let currentId = null;
+  let pollTimer = null;
+  let stickToBottom = true;
+
+  function fmtSec(s) {
+    if (s == null || !Number.isFinite(s) || s < 0) return '-';
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = Math.floor(s % 60);
+    return (h ? String(h).padStart(2, '0') + ':' : '') +
+      String(m).padStart(2, '0') + ':' + String(sec).padStart(2, '0');
+  }
+
+  function render(d) {
+    titleEl.textContent = d.title || 'Transcode detail';
+    badgeEl.className = 'badge badge-' +
+      (d.status === 'transcoding' ? 'idle' :
+       d.status === 'ready' ? 'running' :
+       d.status === 'error' ? 'error' : 'idle');
+    badgeEl.textContent = d.status;
+
+    const pct = d.percent != null ? d.percent : (d.status === 'ready' ? 100 : 0);
+    barEl.style.width = pct + '%';
+
+    const parts = [];
+    if (d.percent != null) parts.push(pct + '%');
+    if (d.time) parts.push(fmtSec(d.time) + (d.duration ? ' / ' + fmtSec(d.duration) : ''));
+    if (d.speed) parts.push(d.speed.toFixed(2) + 'x');
+    labelEl.textContent = parts.join(' · ') || (d.status === 'ready' ? 'done' : 'working…');
+
+    timeEl.textContent = d.time ? fmtSec(d.time) : '-';
+    speedEl.textContent = d.speed ? d.speed.toFixed(2) + 'x' : '-';
+    fpsEl.textContent = d.fps ? Math.round(d.fps) + '' : '-';
+    eta2El.textContent = fmtSec(d.eta_seconds);
+    etaEl.textContent = d.status === 'transcoding' && d.eta_seconds
+      ? '~' + fmtSec(d.eta_seconds) + ' left'
+      : (d.last_error || '');
+
+    if (d.log_tail != null && d.log_tail !== logEl.textContent) {
+      const nearBottom = stickToBottom;
+      logEl.textContent = d.log_tail || '(belum ada log)';
+      if (nearBottom) logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    // Toggle action buttons based on status.
+    cancelForm.style.display = d.status === 'transcoding' ? '' : 'none';
+    cancelForm.action = '/videos/' + d.id + '/cancel-prepare';
+    retryForm.style.display = d.status === 'error' ? '' : 'none';
+    retryForm.action = '/videos/' + d.id + '/prepare';
+  }
+
+  async function poll() {
+    if (!currentId) return;
+    try {
+      const r = await fetch('/videos/' + currentId + '/status', { cache: 'no-store' });
+      if (!r.ok) {
+        labelEl.textContent = 'failed to load (' + r.status + ')';
+        logEl.textContent = r.status === 404
+          ? 'Endpoint belum tersedia. Restart server dulu (Ctrl+C lalu `node app.js`).'
+          : 'HTTP ' + r.status + ' ' + r.statusText;
+        return;
+      }
+      const ct = r.headers.get('content-type') || '';
+      if (!ct.includes('application/json')) {
+        labelEl.textContent = 'session expired';
+        logEl.textContent = 'Sesi login habis. Refresh halaman dan login ulang.';
+        return;
+      }
+      const d = await r.json();
+      render(d);
+      if (d.status !== 'transcoding' && !dlg.dataset.reloadScheduled) {
+        dlg.dataset.reloadScheduled = '1';
+        setTimeout(() => { if (!dlg.open) window.location.reload(); }, 3000);
+      }
+    } catch (err) {
+      labelEl.textContent = 'network error';
+      logEl.textContent = String(err && err.message ? err.message : err);
+    }
+  }
+
+  // Track whether user scrolled away from the bottom of the log.
+  logEl.addEventListener('scroll', () => {
+    const delta = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight;
+    stickToBottom = delta < 20;
+  });
+
+  document.addEventListener('modal:before-open', (e) => {
+    if (e.detail.id !== 'job-detail') return;
+    const btn = e.detail.trigger;
+    currentId = btn && btn.dataset.videoId ? Number(btn.dataset.videoId) : null;
+    titleEl.textContent = (btn && btn.dataset.videoTitle) || 'Transcode detail';
+    badgeEl.textContent = 'loading';
+    badgeEl.className = 'badge badge-idle';
+    labelEl.textContent = 'loading…';
+    barEl.style.width = '0%';
+    timeEl.textContent = speedEl.textContent = fpsEl.textContent = eta2El.textContent = '-';
+    etaEl.textContent = '';
+    logEl.textContent = '(loading log…)';
+    stickToBottom = true;
+    delete dlg.dataset.reloadScheduled;
+    poll();
+    pollTimer = setInterval(poll, 2000);
+  });
+
+  dlg.addEventListener('close', () => {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    currentId = null;
+  });
+})();
+
+// Table row status badge — poll percent inline for transcoding rows so the
+// badge shows "transcoding 42%" even without opening the modal.
+(function () {
+  const nodes = document.querySelectorAll('[data-progress-badge-pct]');
+  if (nodes.length === 0) return;
+  const ids = new Set();
+  nodes.forEach((n) => ids.add(n.dataset.progressBadgePct));
+
+  async function pollOne(id) {
+    try {
+      const r = await fetch('/videos/' + id + '/progress', { cache: 'no-store' });
+      if (!r.ok) return;
+      const d = await r.json();
+      if (d.status !== 'transcoding') { window.location.reload(); return; }
+      const pct = d.percent != null ? d.percent : null;
+      document.querySelectorAll('[data-progress-badge-pct="' + id + '"]').forEach((el) => {
+        el.textContent = pct != null ? pct + '%' : '…';
+      });
+    } catch (_) {}
+  }
+
+  ids.forEach((id) => { pollOne(id); setInterval(() => pollOne(id), 3000); });
+})();
+</script>
+<%- include('partials/footer') %>

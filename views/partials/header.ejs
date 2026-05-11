@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title><%= typeof title !== 'undefined' ? title + ' · AwanStream' : 'AwanStream' %></title>
+  <link rel="stylesheet" href="/css/app.css" />
+</head>
+<body class="<%= typeof currentUser !== 'undefined' && currentUser ? 'app' : 'auth' %>">
+<% if (typeof currentUser !== 'undefined' && currentUser) {
+     const activePath = typeof activeNav !== 'undefined' ? activeNav : '';
+%>
+  <input type="checkbox" id="sidebar-toggle" class="sidebar-toggle-input" />
+  <label for="sidebar-toggle" class="sidebar-backdrop" aria-hidden="true"></label>
+
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <span class="brand-dot"></span>
+      <span class="brand-name">AwanStream</span>
+    </div>
+    <nav class="sidebar-nav">
+      <a href="/" class="nav-item <%= activePath === 'dashboard' ? 'active' : '' %>">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12l2-2 7-7 7 7 2 2"/><path d="M5 10v10h14V10"/></svg>
+        Dashboard
+      </a>
+      <a href="/videos" class="nav-item nav-parent <%= activePath === 'videos' || activePath === 'playlists' ? 'parent-active' : '' %>">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="14" height="14" rx="2"/><path d="M22 7l-6 5 6 5V7z"/></svg>
+        Videos
+      </a>
+      <a href="/videos" class="nav-item nav-child <%= activePath === 'videos' ? 'active' : '' %>">
+        Library
+      </a>
+      <a href="/playlists" class="nav-item nav-child <%= activePath === 'playlists' ? 'active' : '' %>">
+        Playlists
+      </a>
+      <a href="/streams" class="nav-item nav-parent <%= activePath === 'streams' || activePath === 'streams-playlist' ? 'parent-active' : '' %>">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12a7 7 0 0 1 14 0"/><path d="M2 12a10 10 0 0 1 20 0"/><circle cx="12" cy="12" r="2"/></svg>
+        Streams
+      </a>
+      <a href="/streams/single" class="nav-item nav-child <%= activePath === 'streams' ? 'active' : '' %>">
+        Single Video
+      </a>
+      <a href="/streams/playlist" class="nav-item nav-child <%= activePath === 'streams-playlist' ? 'active' : '' %>">
+        Playlist
+      </a>
+      <a href="/schedules" class="nav-item <%= activePath === 'schedules' ? 'active' : '' %>">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+        Schedules
+      </a>
+    </nav>
+    <div class="sidebar-user">
+      <div class="avatar"><%= currentUser.username.charAt(0).toUpperCase() %></div>
+      <div class="user-meta">
+        <div class="user-name">@<%= currentUser.username %></div>
+        <form method="POST" action="/logout" class="inline">
+          <button type="submit" class="btn-link">Logout</button>
+        </form>
+      </div>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <label for="sidebar-toggle" class="hamburger" aria-label="Toggle menu">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </label>
+      <div class="topbar-title">
+        <h1><%= typeof pageTitle !== 'undefined' ? pageTitle : (typeof title !== 'undefined' ? title : 'AwanStream') %></h1>
+        <% if (typeof pageSubtitle !== 'undefined' && pageSubtitle) { %>
+          <p class="muted small"><%= pageSubtitle %></p>
+        <% } %>
+      </div>
+      <div class="topbar-actions">
+        <% if (typeof topbarActions !== 'undefined') { %>
+          <%- topbarActions %>
+        <% } %>
+        <span class="user-pill">@<%= currentUser.username %></span>
+      </div>
+    </header>
+    <main class="content">
+<% } else { %>
+  <main class="container">
+<% } %>

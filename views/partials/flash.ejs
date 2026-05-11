@@ -1,0 +1,14 @@
+<% if (typeof error !== 'undefined' && error) { %>
+  <div class="alert alert-error" data-toast>
+    <span class="alert-icon">⚠</span>
+    <span class="alert-msg"><%= error %></span>
+    <button type="button" class="alert-close" onclick="this.parentElement.remove()" aria-label="Dismiss">×</button>
+  </div>
+<% } %>
+<% if (typeof notice !== 'undefined' && notice) { %>
+  <div class="alert alert-ok" data-toast>
+    <span class="alert-icon">✓</span>
+    <span class="alert-msg"><%= notice %></span>
+    <button type="button" class="alert-close" onclick="this.parentElement.remove()" aria-label="Dismiss">×</button>
+  </div>
+<% } %>

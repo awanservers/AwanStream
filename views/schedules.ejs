@@ -1,0 +1,113 @@
+<%- include('partials/header', {
+  title: 'Schedules',
+  activeNav: 'schedules',
+  pageTitle: 'Schedules',
+  pageSubtitle: 'Auto-start dan auto-stop streaming pada waktu tertentu.',
+  topbarActions: `
+    <button type="button" class="btn btn-primary" data-open-modal="new-schedule">+ New schedule</button>
+  `,
+}) %>
+<%- include('partials/flash', { error, notice }) %>
+
+<% if (schedules.length === 0) { %>
+  <div class="card empty">
+    <p class="muted">Belum ada schedule.</p>
+    <button type="button" class="btn btn-primary" data-open-modal="new-schedule">+ Buat schedule pertama</button>
+  </div>
+<% } else { %>
+  <div class="table-wrap card card-flush">
+    <table class="table">
+      <thead><tr>
+        <th class="col-w-title">Stream</th>
+        <th class="col-w-title">Video</th>
+        <th class="col-w-date">Start</th>
+        <th class="col-w-date">Stop</th>
+        <th class="col-w-status">Status</th>
+        <th class="col-w-actions">Actions</th>
+      </tr></thead>
+      <tbody>
+        <% schedules.forEach(sc => { %>
+          <tr>
+            <td class="truncate" title="<%= sc.stream_name %>"><%= sc.stream_name %></td>
+            <td class="truncate" title="<%= sc.video_title || '-' %>"><%= sc.video_title || '-' %></td>
+            <td class="col-date small"><%= formatTime(sc.start_at) %></td>
+            <td class="col-date small"><%= sc.stop_at ? formatTime(sc.stop_at) : '-' %></td>
+            <td>
+              <% if (sc.status === 'pending') { %>
+                <span class="badge badge-idle">pending</span>
+              <% } else if (sc.status === 'started') { %>
+                <span class="badge badge-running">started</span>
+              <% } else if (sc.status === 'done') { %>
+                <span class="badge badge-idle">done</span>
+              <% } else if (sc.status === 'cancelled') { %>
+                <span class="badge badge-idle">cancelled</span>
+              <% } else { %>
+                <span class="badge badge-error"><%= sc.status %></span>
+              <% } %>
+              <% if (sc.last_error) { %>
+                <div class="small muted"><%= sc.last_error %></div>
+              <% } %>
+            </td>
+            <td class="actions">
+              <% if (sc.status === 'pending') { %>
+                <form method="POST" action="/schedules/<%= sc.id %>/cancel" class="inline">
+                  <button class="btn btn-warn" type="submit">Cancel</button>
+                </form>
+              <% } %>
+              <form method="POST" action="/schedules/<%= sc.id %>/delete" class="inline"
+                    data-confirm="Hapus schedule ini?"
+                    data-confirm-title="Hapus schedule"
+                    data-confirm-action="Hapus">
+                <button class="btn btn-danger" type="submit">Delete</button>
+              </form>
+            </td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+<% } %>
+
+<dialog id="new-schedule" class="modal">
+  <div class="modal-card">
+    <header class="modal-header">
+      <h2>New schedule</h2>
+      <button type="button" class="modal-close" data-close-modal aria-label="Close">×</button>
+    </header>
+    <% if (streams.length === 0) { %>
+      <div class="modal-body">
+        <p class="muted">Buat stream dulu di halaman <a href="/streams">Streams</a>.</p>
+      </div>
+      <footer class="modal-footer">
+        <button type="button" class="btn" data-close-modal>Tutup</button>
+      </footer>
+    <% } else { %>
+      <form method="POST" action="/schedules">
+        <div class="modal-body">
+          <div class="grid-2">
+            <label>Stream
+              <select name="stream_id" required>
+                <% streams.forEach(s => { %>
+                  <option value="<%= s.id %>"><%= s.name %></option>
+                <% }) %>
+              </select>
+            </label>
+            <label>Start at (<%= tzLabel %>)
+              <input type="datetime-local" name="start_at" required>
+            </label>
+            <label class="full">Stop at (<%= tzLabel %>, optional)
+              <input type="datetime-local" name="stop_at">
+              <span class="small muted">Kosongkan untuk stop manual atau biarkan FFmpeg selesai sendiri.</span>
+            </label>
+          </div>
+        </div>
+        <footer class="modal-footer">
+          <button type="button" class="btn" data-close-modal>Batal</button>
+          <button type="submit" class="btn btn-primary">Simpan</button>
+        </footer>
+      </form>
+    <% } %>
+  </div>
+</dialog>
+
+<%- include('partials/footer') %>
