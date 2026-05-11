@@ -22,8 +22,12 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY package*.json ./
 COPY . .
 
-# Create runtime directories
-RUN mkdir -p db logs public/uploads
+# Create runtime directories and non-root user
+RUN addgroup -S awanstream && adduser -S awanstreamuser -G awanstream \
+    && mkdir -p db logs public/uploads \
+    && chown -R awanstreamuser:awanstream /app
+
+USER awanstreamuser
 
 # Default port
 EXPOSE 7575
