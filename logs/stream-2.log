@@ -1,0 +1,18 @@
+
+=== 2026-05-11T03:42:37.938Z starting ffmpeg -hide_banner -loglevel warning -re -stream_loop -1 -i /home/awanservers/awanstream/public/uploads/1778470853920_Fireplace_Vertical.mp4 -map 0:v:0 -map 0:a:0? -c:v copy -c:a aac -b:a 128k -ar 44100 -max_muxing_queue_size 1024 -f flv rtmp://x.rtmp.youtube.com/live2/***REDACTED***
+
+=== 2026-05-11T03:53:30.549Z starting ffmpeg -hide_banner -loglevel warning -re -stream_loop -1 -i /home/awanservers/awanstream/public/uploads/1778470853920_Fireplace_Vertical.mp4 -map 0:v:0 -map 0:a:0? -c:v copy -c:a aac -b:a 128k -ar 44100 -max_muxing_queue_size 1024 -f flv rtmp://x.rtmp.youtube.com/live2/***REDACTED***
+[aost#0:1/aac @ 0x58f158165740] Error submitting a packet to the muxer: Connection reset by peer
+[out#0/flv @ 0x58f158097000] Error muxing a packet
+[flv @ 0x58f1580ae180] Failed to update header with correct duration.
+[flv @ 0x58f1580ae180] Failed to update header with correct filesize.
+[out#0/flv @ 0x58f158097000] Error writing trailer: Connection reset by peer
+[out#0/flv @ 0x58f158097000] Error closing file: Broken pipe
+
+=== 2026-05-11T04:04:25.607Z ffmpeg exit code=152 signal=null
+
+=== 2026-05-11T04:05:15.072Z starting ffmpeg -hide_banner -loglevel warning -re -stream_loop -1 -i /home/awanservers/awanstream/public/uploads/1778470853920_Fireplace_Vertical.mp4 -map 0:v:0 -map 0:a:0? -c:v copy -c:a aac -b:a 128k -ar 44100 -max_muxing_queue_size 1024 -f flv rtmp://x.rtmp.youtube.com/live2/***REDACTED***
+[flv @ 0x5643900ae180] Failed to update header with correct duration.
+[flv @ 0x5643900ae180] Failed to update header with correct filesize.
+
+=== 2026-05-11T04:06:07.514Z ffmpeg exit code=255 signal=null
