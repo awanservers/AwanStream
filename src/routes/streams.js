@@ -1,5 +1,6 @@
 const express = require('express');
 const path = require('path');
+const fs = require('fs');
 const { db } = require('../db');
 const streamManager = require('../streamManager');
 const transcoder = require('../transcoder');
@@ -132,6 +133,10 @@ router.post('/:id/delete', (req, res) => {
   const back = stream && stream.playlist_id ? '/streams/playlist' : '/streams/single';
   if (streamManager.isRunning(id)) streamManager.stopStream(id);
   db.prepare('DELETE FROM streams WHERE id=?').run(id);
+  // Cleanup log files for this stream.
+  const logPath = path.join(__dirname, '..', 'logs', `stream-${id}.log`);
+  try { fs.unlinkSync(logPath); } catch (_) {}
+  try { fs.unlinkSync(logPath + '.old'); } catch (_) {}
   res.redirect(back + '?notice=Stream+deleted');
 });
 

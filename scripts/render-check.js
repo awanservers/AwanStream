@@ -110,6 +110,30 @@ const pages = [
       videos: [{ id: 1, title: 'v1' }],
     },
   },
+  {
+    name: 'looper',
+    file: 'looper.ejs',
+    locals: {
+      ...common,
+      currentUser: { id: 1, username: 'admin' },
+      videos: [{
+        id: 1, title: 'Fireplace clip', filename: 'f.mp4',
+        duration_seconds: 12, src_width: 1920, src_height: 1080,
+        size_bytes: 2_500_000, thumbnail: null, status: 'ready',
+        folder_id: null, created_at: '2026-05-11 10:00:00',
+      }],
+      presets: [
+        { key: '30m',  label: '30 minutes', seconds: 1800 },
+        { key: '1h',   label: '1 hour',     seconds: 3600 },
+        { key: '2h',   label: '2 hours',    seconds: 7200 },
+        { key: '3h',   label: '3 hours',    seconds: 10800 },
+        { key: '6h',   label: '6 hours',    seconds: 21600 },
+        { key: '12h',  label: '12 hours',   seconds: 43200 },
+        { key: '24h',  label: '24 hours',   seconds: 86400 },
+      ],
+      activeJobs: [],
+    },
+  },
 ];
 
 let fail = 0;

@@ -1,0 +1,251 @@
+<%- include('partials/header', {
+  title: 'Loop',
+  activeNav: 'looper',
+  pageTitle: 'Loop Video',
+  pageSubtitle: 'Perpanjang clip pendek jadi video panjang (1-24 jam) untuk 24/7 livestream.',
+}) %>
+<%- include('partials/flash', { error, notice }) %>
+
+<% if (videos.length === 0) { %>
+  <div class="card empty">
+    <p class="muted">Belum ada video dengan durasi terdeteksi.</p>
+    <p class="muted small">Upload clip dulu di <a href="/videos">Library</a>. Setelah upload, durasi otomatis di-probe dan video akan muncul di sini.</p>
+  </div>
+<% } else { %>
+  <div class="card">
+    <form method="POST" action="/looper/start" id="loop-form">
+      <div class="grid-2">
+        <label class="full">Video sumber
+          <select name="source_video_id" id="source_video_id" required>
+            <option value="">— Pilih video —</option>
+            <% videos.forEach(v => {
+                 const dur = Math.round(v.duration_seconds || 0);
+                 const durLabel = dur >= 60 ? Math.floor(dur/60) + 'm ' + (dur%60) + 's' : dur + 's';
+                 const sizeLabel = v.size_bytes ? (v.size_bytes / (1024*1024)).toFixed(1) + ' MB' : '';
+                 const resLabel = v.src_width && v.src_height ? v.src_width + '×' + v.src_height : '';
+                 const meta = [durLabel, resLabel, sizeLabel].filter(Boolean).join(' · ');
+            %>
+              <option value="<%= v.id %>" data-duration="<%= v.duration_seconds %>">
+                <%= v.title %> — <%= meta %>
+              </option>
+            <% }) %>
+          </select>
+          <span class="small muted">Hanya video dengan durasi terdeteksi yang tampil.</span>
+        </label>
+
+        <label class="full">Target durasi
+          <div class="preset-grid">
+            <% presets.forEach((p, idx) => { %>
+              <label class="preset-chip">
+                <input type="radio" name="target_preset" value="<%= p.key %>"
+                       <%= idx === 2 ? 'checked' : '' %>>
+                <span><%= p.label %></span>
+              </label>
+            <% }) %>
+            <label class="preset-chip">
+              <input type="radio" name="target_preset" value="custom">
+              <span>Custom</span>
+            </label>
+          </div>
+          <div id="custom-duration-row" style="display:none; margin-top:10px; display:flex; align-items:center; gap:8px;">
+            <input type="number" name="custom_minutes" id="custom_minutes"
+                   min="1" max="1440" step="1" placeholder="Menit"
+                   style="max-width:160px;">
+            <span class="small muted">menit (1 - 1440)</span>
+          </div>
+        </label>
+
+        <label class="full">Title output <span class="muted small">(opsional)</span>
+          <input type="text" name="title" id="title"
+                 placeholder="Kosongkan untuk auto-generate: '<Source> (loop Nh)'">
+        </label>
+
+        <div class="full" id="estimate-row" style="display:none;">
+          <div class="alert alert-info" id="estimate-box"></div>
+        </div>
+      </div>
+
+      <footer class="modal-footer" style="margin-top:16px;">
+        <a href="/videos" class="btn">Cancel</a>
+        <button type="submit" class="btn btn-primary">Start loop</button>
+      </footer>
+    </form>
+  </div>
+<% } %>
+
+<h2 style="margin-top:28px; margin-bottom:12px;">Active jobs</h2>
+<div id="active-jobs-wrap">
+  <% if (activeJobs.length === 0) { %>
+    <div class="card empty">
+      <p class="muted">Tidak ada loop job yang sedang berjalan.</p>
+    </div>
+  <% } else { %>
+    <div class="table-wrap card card-flush">
+      <table class="table" id="jobs-table">
+        <thead><tr>
+          <th>Job</th>
+          <th>Source → Output</th>
+          <th>Target</th>
+          <th>Progress</th>
+          <th>Speed</th>
+          <th>ETA</th>
+          <th>Actions</th>
+        </tr></thead>
+        <tbody>
+          <% activeJobs.forEach(j => { %>
+            <tr data-job-id="<%= j.jobId %>">
+              <td>#<%= j.jobId %></td>
+              <td class="small">
+                <%= j.sourceTitle %><br>
+                <span class="muted">→ <%= j.outputTitle %></span>
+              </td>
+              <td class="small">
+                <% const t = j.target; %>
+                <%= t >= 3600 ? (t/3600).toFixed(t%3600===0?0:1) + 'h' : Math.round(t/60) + 'm' %>
+              </td>
+              <td>
+                <div class="progress">
+                  <div class="progress-bar" style="width: <%= j.progress.percent || 0 %>%;"></div>
+                </div>
+                <span class="small muted job-percent"><%= j.progress.percent || 0 %>%</span>
+              </td>
+              <td class="small job-speed"><%= j.progress.speed ? j.progress.speed.toFixed(1) + 'x' : '-' %></td>
+              <td class="small job-eta">-</td>
+              <td>
+                <form method="POST" action="/looper/<%= j.jobId %>/cancel" class="inline"
+                      data-confirm="Cancel loop job ini? Video output yang belum selesai akan dihapus."
+                      data-confirm-title="Cancel loop"
+                      data-confirm-action="Cancel job">
+                  <button type="submit" class="btn btn-danger">Cancel</button>
+                </form>
+              </td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+  <% } %>
+</div>
+
+<script>
+(function() {
+  const presetRadios = document.querySelectorAll('input[name="target_preset"]');
+  const customRow = document.getElementById('custom-duration-row');
+  const customInput = document.getElementById('custom_minutes');
+  const sourceSelect = document.getElementById('source_video_id');
+  const estimateRow = document.getElementById('estimate-row');
+  const estimateBox = document.getElementById('estimate-box');
+
+  function selectedTargetSeconds() {
+    const checked = document.querySelector('input[name="target_preset"]:checked');
+    if (!checked) return null;
+    if (checked.value === 'custom') {
+      const m = Number(customInput.value);
+      if (!Number.isFinite(m) || m <= 0) return null;
+      return Math.round(m * 60);
+    }
+    const map = { '30m': 1800, '1h': 3600, '2h': 7200, '3h': 10800, '6h': 21600, '12h': 43200, '24h': 86400 };
+    return map[checked.value] || null;
+  }
+
+  function updateCustomVisibility() {
+    if (!customRow) return;
+    const customChecked = document.querySelector('input[name="target_preset"][value="custom"]');
+    customRow.style.display = (customChecked && customChecked.checked) ? 'flex' : 'none';
+  }
+
+  function updateEstimate() {
+    if (!estimateRow || !sourceSelect) return;
+    const target = selectedTargetSeconds();
+    const opt = sourceSelect.selectedOptions[0];
+    const srcDur = opt ? Number(opt.dataset.duration) : null;
+    if (!target || !srcDur) {
+      estimateRow.style.display = 'none';
+      return;
+    }
+    const loops = Math.ceil(target / srcDur);
+    const outputH = (target / 3600).toFixed(target % 3600 === 0 ? 0 : 1);
+    const srcLabel = srcDur >= 60
+      ? Math.floor(srcDur / 60) + 'm ' + Math.round(srcDur % 60) + 's'
+      : Math.round(srcDur) + 's';
+    estimateBox.textContent =
+      'Clip sumber ' + srcLabel + ' akan di-loop ~' + loops + ' kali untuk menghasilkan ' +
+      outputH + ' jam. Proses cepat karena tidak re-encode (hanya repeat container).';
+    estimateRow.style.display = 'block';
+  }
+
+  presetRadios.forEach(r => r.addEventListener('change', () => {
+    updateCustomVisibility();
+    updateEstimate();
+  }));
+  if (customInput) customInput.addEventListener('input', updateEstimate);
+  if (sourceSelect) sourceSelect.addEventListener('change', updateEstimate);
+
+  const form = document.getElementById('loop-form');
+  if (form) {
+    form.addEventListener('submit', (e) => {
+      if (!sourceSelect.value) {
+        e.preventDefault();
+        alert('Pilih video sumber dulu.');
+        return;
+      }
+      const target = selectedTargetSeconds();
+      if (!target) {
+        e.preventDefault();
+        alert('Pilih target durasi.');
+        return;
+      }
+      const opt = sourceSelect.selectedOptions[0];
+      const srcDur = opt ? Number(opt.dataset.duration) : null;
+      if (srcDur && target < srcDur) {
+        e.preventDefault();
+        alert('Target (' + target + 's) lebih pendek dari sumber (' + Math.round(srcDur) + 's). Pilih target yang lebih panjang.');
+      }
+    });
+  }
+
+  // Live poll active jobs every 2s.
+  function formatEta(sec) {
+    if (!sec || sec < 0) return '-';
+    if (sec < 60) return sec + 's';
+    if (sec < 3600) return Math.floor(sec / 60) + 'm ' + (sec % 60) + 's';
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    return h + 'h ' + m + 'm';
+  }
+
+  let lastJobIds = <%- JSON.stringify(activeJobs.map(j => j.jobId)) %>;
+
+  async function poll() {
+    try {
+      const r = await fetch('/looper/progress', { cache: 'no-store' });
+      if (!r.ok) return;
+      const data = await r.json();
+      const currentIds = data.jobs.map(j => j.jobId);
+      const disappeared = lastJobIds.some(id => !currentIds.includes(id));
+      if (disappeared) { window.location.reload(); return; }
+      const newAppeared = currentIds.some(id => !lastJobIds.includes(id));
+      if (newAppeared) { window.location.reload(); return; }
+      data.jobs.forEach(j => {
+        const row = document.querySelector('tr[data-job-id="' + j.jobId + '"]');
+        if (!row) return;
+        const bar = row.querySelector('.progress-bar');
+        if (bar) bar.style.width = (j.percent || 0) + '%';
+        const pct = row.querySelector('.job-percent');
+        if (pct) pct.textContent = (j.percent || 0) + '%';
+        const sp = row.querySelector('.job-speed');
+        if (sp) sp.textContent = j.speed ? j.speed.toFixed(1) + 'x' : '-';
+        const eta = row.querySelector('.job-eta');
+        if (eta) eta.textContent = formatEta(j.etaSec);
+      });
+    } catch (_) {}
+  }
+  if (lastJobIds.length > 0) setInterval(poll, 2000);
+
+  // Init.
+  updateCustomVisibility();
+  updateEstimate();
+})();
+</script>
+
+<%- include('partials/footer') %>

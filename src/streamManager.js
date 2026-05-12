@@ -127,6 +127,17 @@ function startStream(stream, videoPath) {
   );
 
   const logPath = path.join(logsDir, `stream-${stream.id}.log`);
+  // Log rotation: if file > 5 MB, rotate to .old (keep 1 backup, cap ~10 MB total).
+  try {
+    if (fs.existsSync(logPath)) {
+      const stat = fs.statSync(logPath);
+      if (stat.size > 5 * 1024 * 1024) {
+        const oldPath = logPath + '.old';
+        try { fs.unlinkSync(oldPath); } catch (_) {}
+        fs.renameSync(logPath, oldPath);
+      }
+    }
+  } catch (_) {}
   const rawLog = fs.createWriteStream(logPath, { flags: 'a' });
   const safeLog = makeRedactingStream(rawLog, stream.stream_key);
 

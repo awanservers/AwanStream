@@ -254,6 +254,45 @@ select { cursor: pointer; }
 .alert { padding: 0.6rem 0.8rem; border-radius: 6px; margin: 0.75rem 0; }
 .alert-error { background: rgba(229, 72, 77, 0.12); border: 1px solid var(--danger); color: #ffbfc1; }
 .alert-ok { background: rgba(48, 164, 108, 0.12); border: 1px solid var(--ok); color: #bde7cf; }
+.alert-info {
+  background: rgba(96, 165, 250, 0.1);
+  border: 1px solid rgba(96, 165, 250, 0.35);
+  color: #c7ddff;
+}
+
+/* ----- Preset chips (used in Loop tool, etc.) ----- */
+
+.preset-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+.preset-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  cursor: pointer;
+  font-size: 0.88rem;
+  color: var(--muted);
+  transition: all 0.15s ease;
+  user-select: none;
+}
+.preset-chip input[type="radio"] {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.preset-chip:hover { border-color: var(--primary); color: var(--text); }
+.preset-chip:has(input:checked) {
+  background: rgba(96, 165, 250, 0.15);
+  border-color: var(--primary);
+  color: var(--text);
+}
 
 /* ----- Login card ----- */
 

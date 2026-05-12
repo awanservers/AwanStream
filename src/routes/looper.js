@@ -1,0 +1,123 @@
+const express = require('express');
+const { db } = require('../db');
+const looper = require('../looper');
+
+const router = express.Router();
+
+// Preset target durations in seconds, displayed on the form.
+const PRESETS = [
+  { key: '30m',  label: '30 minutes', seconds: 30 * 60 },
+  { key: '1h',   label: '1 hour',     seconds: 1 * 3600 },
+  { key: '2h',   label: '2 hours',    seconds: 2 * 3600 },
+  { key: '3h',   label: '3 hours',    seconds: 3 * 3600 },
+  { key: '6h',   label: '6 hours',    seconds: 6 * 3600 },
+  { key: '12h',  label: '12 hours',   seconds: 12 * 3600 },
+  { key: '24h',  label: '24 hours',   seconds: 24 * 3600 },
+];
+
+router.get('/', (req, res) => {
+  // Eligible sources: anything with a valid duration on disk. We show
+  // 'ready', 'uploaded', and 'error' (in case user wants to retry). We hide
+  // rows currently transcoding/downloading to avoid file-in-use conflicts.
+  const videos = db.prepare(`
+    SELECT id, title, filename, duration_seconds, src_width, src_height,
+           size_bytes, thumbnail, status, folder_id, created_at
+    FROM videos
+    WHERE status IN ('ready', 'uploaded')
+      AND duration_seconds IS NOT NULL
+      AND duration_seconds > 0
+    ORDER BY created_at DESC
+  `).all();
+
+  const activeJobs = looper.listJobs().map((j) => {
+    const src = db.prepare('SELECT title FROM videos WHERE id=?').get(j.sourceVideoId);
+    const out = db.prepare('SELECT title FROM videos WHERE id=?').get(j.outputVideoId);
+    return {
+      ...j,
+      sourceTitle: src ? src.title : '(deleted)',
+      outputTitle: out ? out.title : '(deleted)',
+    };
+  });
+
+  res.render('looper', {
+    title: 'Loop',
+    activeNav: 'looper',
+    videos,
+    presets: PRESETS,
+    activeJobs,
+    error: req.query.error || null,
+    notice: req.query.notice || null,
+  });
+});
+
+router.post('/start', (req, res) => {
+  const sourceVideoId = Number(req.body.source_video_id);
+  const targetPreset = req.body.target_preset;
+  const customMinutes = Number(req.body.custom_minutes);
+  const customTitle = (req.body.title || '').trim() || null;
+
+  if (!sourceVideoId) {
+    return res.redirect('/looper?error=' + encodeURIComponent('Pilih video sumber dulu.'));
+  }
+
+  let targetSeconds;
+  if (targetPreset === 'custom') {
+    if (!Number.isFinite(customMinutes) || customMinutes <= 0) {
+      return res.redirect('/looper?error=' + encodeURIComponent('Custom duration harus angka menit > 0.'));
+    }
+    targetSeconds = Math.round(customMinutes * 60);
+  } else {
+    const preset = PRESETS.find((p) => p.key === targetPreset);
+    if (!preset) {
+      return res.redirect('/looper?error=' + encodeURIComponent('Preset tidak valid.'));
+    }
+    targetSeconds = preset.seconds;
+  }
+
+  try {
+    const { jobId } = looper.start(sourceVideoId, targetSeconds, customTitle);
+    return res.redirect('/looper?notice=' + encodeURIComponent(`Loop started (job #${jobId}). Video baru akan muncul di Library setelah selesai.`));
+  } catch (err) {
+    return res.redirect('/looper?error=' + encodeURIComponent(err.message));
+  }
+});
+
+// JSON progress endpoint for live polling from the page.
+router.get('/progress', (req, res) => {
+  const jobs = looper.listJobs().map((j) => {
+    const src = db.prepare('SELECT title FROM videos WHERE id=?').get(j.sourceVideoId);
+    const out = db.prepare('SELECT title, status FROM videos WHERE id=?').get(j.outputVideoId);
+    const elapsed = Math.max(0, Math.round((Date.now() - j.startedAt) / 1000));
+    // Rough ETA: assume constant speed. progress.speed is ffmpeg speed factor
+    // (how many output-seconds produced per real second).
+    let etaSec = null;
+    if (j.progress.speed && j.progress.speed > 0 && j.target && j.progress.time) {
+      const remaining = Math.max(0, j.target - j.progress.time);
+      etaSec = Math.round(remaining / j.progress.speed);
+    }
+    return {
+      jobId: j.jobId,
+      sourceVideoId: j.sourceVideoId,
+      sourceTitle: src ? src.title : '(deleted)',
+      outputVideoId: j.outputVideoId,
+      outputTitle: out ? out.title : '(deleted)',
+      outputStatus: out ? out.status : null,
+      targetSeconds: j.target,
+      percent: j.progress.percent,
+      elapsedSec: elapsed,
+      speed: j.progress.speed,
+      etaSec,
+    };
+  });
+  res.json({ jobs });
+});
+
+router.post('/:jobId/cancel', (req, res) => {
+  const ok = looper.cancel(req.params.jobId);
+  if (!ok) {
+    return res.redirect('/looper?error=' + encodeURIComponent('Job tidak ditemukan atau sudah selesai.'));
+  }
+  return res.redirect('/looper?notice=' + encodeURIComponent('Loop job cancelled.'));
+});
+
+module.exports = router;

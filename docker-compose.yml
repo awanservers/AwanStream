@@ -10,6 +10,11 @@ services:
       - awanstream-db:/app/db
       - awanstream-logs:/app/logs
       - awanstream-uploads:/app/public/uploads
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     healthcheck:
       test: ["CMD", "node", "-e", "const http=require('http');http.get('http://localhost:7575/login',(r)=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))"]
       interval: 30s

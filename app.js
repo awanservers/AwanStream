@@ -11,6 +11,7 @@ const streamManager = require('./src/streamManager');
 const transcoder = require('./src/transcoder');
 const downloader = require('./src/downloader');
 const scheduler = require('./src/scheduler');
+const looper = require('./src/looper');
 const { requireAuth, injectUser } = require('./src/auth');
 
 const authRoutes = require('./src/routes/auth');
@@ -19,12 +20,14 @@ const streamRoutes = require('./src/routes/streams');
 const scheduleRoutes = require('./src/routes/schedules');
 const playlistRoutes = require('./src/routes/playlists');
 const historyRoutes = require('./src/routes/history');
+const looperRoutes = require('./src/routes/looper');
 
 ensureSchema();
 streamManager.reconcileOnBoot();
 transcoder.reconcileOnBoot();
 downloader.reconcileOnBoot();
 scheduler.reconcileOnBoot();
+looper.reconcileOnBoot();
 scheduler.start();
 
 const app = express();
@@ -403,6 +406,7 @@ app.use('/streams', requireAuth, streamRoutes);
 app.use('/schedules', requireAuth, scheduleRoutes);
 app.use('/playlists', requireAuth, playlistRoutes);
 app.use('/history', requireAuth, historyRoutes);
+app.use('/looper', requireAuth, looperRoutes);
 
 app.use((err, req, res, _next) => {
   console.error(err);
