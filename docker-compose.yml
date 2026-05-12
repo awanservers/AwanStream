@@ -9,12 +9,17 @@ services:
     environment:
       NODE_ENV: production
     volumes:
-      - ./db:/app/db
-      - ./logs:/app/logs
-      - ./public/uploads:/app/public/uploads
+      - awanstream-db:/app/db
+      - awanstream-logs:/app/logs
+      - awanstream-uploads:/app/public/uploads
     healthcheck:
       test: ["CMD", "node", "-e", "const http=require('http');http.get('http://localhost:7575/login',(r)=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 10s
+
+volumes:
+  awanstream-db:
+  awanstream-logs:
+  awanstream-uploads:

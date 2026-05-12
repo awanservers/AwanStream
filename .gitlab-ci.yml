@@ -57,7 +57,7 @@ deploy-to-server:
     - ssh-keyscan -H $DEPLOY_HOST >> ~/.ssh/known_hosts || true
   script:
     - echo "🚀 Memulai Auto-Deploy AwanStream Versi $CI_COMMIT_SHORT_SHA..."
-    # 1. Siapkan folder di server
+    # 1. Siapkan folder deploy (data runtime pakai Docker named volumes)
     - ssh $DEPLOY_USER@$DEPLOY_HOST "mkdir -p $DEPLOY_PATH"
     # 2. Generate .env dari CI variables
     - |

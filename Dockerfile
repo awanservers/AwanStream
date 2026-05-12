@@ -22,9 +22,9 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY package*.json ./
 COPY . .
 
-# Create runtime directories and non-root user
-RUN addgroup -S awanstream && adduser -S awanstreamuser -G awanstream \
-    && mkdir -p db logs public/uploads \
+# Create runtime directories and non-root user (UID 1000 supaya predictable di host volume mount)
+RUN addgroup -g 1000 -S awanstream && adduser -u 1000 -S awanstreamuser -G awanstream \
+    && mkdir -p db logs public/uploads public/uploads/thumbs \
     && chown -R awanstreamuser:awanstream /app
 
 USER awanstreamuser
