@@ -6,8 +6,6 @@ services:
     ports:
       - "${PORT:-7575}:7575"
     env_file: .env
-    environment:
-      NODE_ENV: production
     volumes:
       - awanstream-db:/app/db
       - awanstream-logs:/app/logs

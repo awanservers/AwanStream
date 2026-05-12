@@ -64,7 +64,7 @@ deploy-to-server:
       ssh $DEPLOY_USER@$DEPLOY_HOST "cat > $DEPLOY_PATH/.env << 'EOF'
       PORT=$APP_PORT
       SESSION_SECRET=$SESSION_SECRET
-      NODE_ENV=production
+      NODE_ENV=development
       TZ=$APP_TZ
       TZ_LABEL=$APP_TZ_LABEL
       DOCKER_IMAGE=$CI_REGISTRY_IMAGE:latest

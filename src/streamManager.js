@@ -18,8 +18,8 @@ const BASE_RETRY_DELAY = 3000;      // 3 seconds
 const MAX_RETRY_DELAY = 60000;      // 60 seconds
 
 // Health check interval (detect stale streams)
-const HEALTH_CHECK_INTERVAL = 30000; // 30 seconds
-const STALE_THRESHOLD = 5 * 60 * 1000; // 5 minutes no activity = stale
+const HEALTH_CHECK_INTERVAL = 60000;   // 60 seconds (polling)
+const STALE_THRESHOLD = 10 * 60 * 1000; // 10 minutes no activity = stale
 let healthCheckTimer = null;
 
 function buildRtmpTarget(rtmpUrl, key) {
@@ -67,7 +67,12 @@ function startStream(stream, videoPath) {
   const target = buildRtmpTarget(stream.rtmp_url, stream.stream_key);
   const args = [
     '-hide_banner',
-    '-loglevel', 'warning',
+    // `info` level supaya FFmpeg print stats periodically ke stderr (bitrate, speed, dll).
+    // Dengan `warning`, FFmpeg diam saat streaming lancar → health check salah deteksi stale.
+    '-loglevel', 'info',
+    // Emit stats setiap 10 detik (default 0.5s terlalu verbose; ini cukup untuk health check).
+    '-stats_period', '10',
+    '-stats',
     '-re',
   ];
   if (stream.loop_video) args.push('-stream_loop', '-1');
