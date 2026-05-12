@@ -49,7 +49,17 @@ deploy:
   before_script:
     - 'command -v ssh-agent >/dev/null || ( apk add --update openssh )'
     - eval $(ssh-agent -s)
-    # DEPLOY_SSH_KEY type File — value is a path to temp file containing the key.
+    # Sanity check — ensure DEPLOY_SSH_KEY variable is injected.
+    # If this prints empty, the variable is Protected but the branch isn't.
+    - |
+      if [ -z "$DEPLOY_SSH_KEY" ]; then
+        echo "❌ DEPLOY_SSH_KEY is empty."
+        echo "This usually means the variable is marked 'Protected' in GitLab,"
+        echo "but the current branch/tag is NOT protected."
+        echo "Fix: either protect the branch, or uncheck 'Protect variable' in Settings → CI/CD → Variables."
+        exit 1
+      fi
+    - echo "✓ DEPLOY_SSH_KEY path = $DEPLOY_SSH_KEY"
     - chmod 400 "$DEPLOY_SSH_KEY"
     - ssh-add "$DEPLOY_SSH_KEY"
     - mkdir -p ~/.ssh
