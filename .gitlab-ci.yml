@@ -49,37 +49,29 @@ deploy:
   before_script:
     - 'command -v ssh-agent >/dev/null || ( apk add --update openssh )'
     - eval $(ssh-agent -s)
-    # Diagnostic output — helps identify variable injection issues.
-    - echo "=== Diagnostic ==="
-    - echo "Branch               : $CI_COMMIT_REF_NAME"
-    - echo "Default branch       : $CI_DEFAULT_BRANCH"
-    - echo "Ref protected        : $CI_COMMIT_REF_PROTECTED"
-    - echo "Environment          : $CI_ENVIRONMENT_NAME"
-    - echo "DEPLOY_HOST set      : $([ -n \"$DEPLOY_HOST\" ] && echo yes || echo NO)"
-    - echo "DEPLOY_USER set      : $([ -n \"$DEPLOY_USER\" ] && echo yes || echo NO)"
-    - echo "DEPLOY_PATH set      : $([ -n \"$DEPLOY_PATH\" ] && echo yes || echo NO)"
-    - echo "DEPLOY_SSH_KEY set   : $([ -n \"$DEPLOY_SSH_KEY\" ] && echo yes || echo NO)"
-    - echo "SESSION_SECRET set   : $([ -n \"$SESSION_SECRET\" ] && echo yes || echo NO)"
-    - echo "=================="
     - |
+      echo "=== Diagnostic ==="
+      echo "Branch               : $CI_COMMIT_REF_NAME"
+      echo "Default branch       : $CI_DEFAULT_BRANCH"
+      echo "Ref protected        : $CI_COMMIT_REF_PROTECTED"
+      echo "Environment          : $CI_ENVIRONMENT_NAME"
+      check() { [ -n "$2" ] && echo "$1 set: yes" || echo "$1 set: NO"; }
+      check DEPLOY_HOST      "$DEPLOY_HOST"
+      check DEPLOY_USER      "$DEPLOY_USER"
+      check DEPLOY_PATH      "$DEPLOY_PATH"
+      check DEPLOY_SSH_KEY   "$DEPLOY_SSH_KEY"
+      check SESSION_SECRET   "$SESSION_SECRET"
+      check APP_PORT         "$APP_PORT"
+      echo "=================="
       if [ -z "$DEPLOY_SSH_KEY" ]; then
         echo ""
-        echo "❌ DEPLOY_SSH_KEY is empty."
-        echo ""
-        echo "Possible causes (match against diagnostic above):"
-        echo ""
-        echo "1. If 'Ref protected' = false AND variable is 'Protected':"
-        echo "   → Uncheck 'Protect variable' in Settings → CI/CD → Variables,"
-        echo "     OR protect the branch in Settings → Repository → Protected branches."
-        echo ""
-        echo "2. If variable has an Environment scope (e.g. 'production'):"
-        echo "   → Edit the variable and set scope to '*' (All)."
-        echo ""
-        echo "3. Also verify variable type is 'File' (not 'Variable')."
-        echo "   File type stores the key content and exposes it as a path at runtime."
+        echo "DEPLOY_SSH_KEY is empty. Common causes:"
+        echo "  1. Variable still Protected, branch not protected"
+        echo "  2. Variable environment scope does not match job environment"
+        echo "  3. Variable type is 'Variable' instead of 'File'"
         exit 1
       fi
-    - echo "✓ DEPLOY_SSH_KEY path = $DEPLOY_SSH_KEY"
+      echo "DEPLOY_SSH_KEY path = $DEPLOY_SSH_KEY"
     - chmod 400 "$DEPLOY_SSH_KEY"
     - ssh-add "$DEPLOY_SSH_KEY"
     - mkdir -p ~/.ssh
