@@ -1,0 +1,25 @@
+<%- include('partials/header', { title: 'Setup', currentUser: null }) %>
+<div class="auth-card">
+  <h1>AwanStream</h1>
+  <p class="muted">First-time setup — bikin admin user</p>
+  <% if (error) { %><div class="alert alert-error"><%= error %></div><% } %>
+  <form method="POST" action="/setup" autocomplete="off">
+    <label>
+      Username
+      <input name="username" value="<%= username %>" minlength="3" pattern="[a-zA-Z0-9_.\-]+" required autofocus />
+      <small class="muted">Minimal 3 karakter. Huruf, angka, _ . -</small>
+    </label>
+    <label>
+      Password
+      <input type="password" name="password" minlength="6" required />
+      <small class="muted">Minimal 6 karakter.</small>
+    </label>
+    <label>
+      Konfirmasi password
+      <input type="password" name="confirm" minlength="6" required />
+    </label>
+    <button class="btn btn-primary" type="submit">Buat admin user</button>
+  </form>
+  <p class="muted small">Form ini hanya muncul saat pertama kali deploy. Setelah admin dibuat, login normal di <code>/login</code>.</p>
+</div>
+<%- include('partials/footer') %>

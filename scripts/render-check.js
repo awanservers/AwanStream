@@ -18,6 +18,11 @@ const pages = [
     locals: { ...common, currentUser: null, error: null },
   },
   {
+    name: 'setup',
+    file: 'setup.ejs',
+    locals: { ...common, currentUser: null, error: null, username: '' },
+  },
+  {
     name: 'dashboard',
     file: 'dashboard.ejs',
     locals: {
