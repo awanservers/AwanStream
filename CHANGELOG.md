@@ -7,55 +7,75 @@ Versi belum di-tag — pakai tanggal sebagai penanda release.
 
 ## [Unreleased]
 
-### Added
-- **Stream History** — riwayat semua sesi streaming yang sudah selesai. Otomatis tercatat saat stream stop (manual atau natural finish) atau error. Halaman `/history` menampilkan stream name, video, platform, durasi, status, dan waktu. Bisa hapus per-entry atau clear all. Minimum 10 detik durasi untuk tercatat.
-- **Auto-Retry with Exponential Backoff** — kalau FFmpeg crash (exit code non-zero), stream otomatis retry hingga 5x dengan delay exponential (3s → 60s max + jitter). User stop = no retry. Retry status terlihat di `last_error` stream. Reset otomatis setelah stream berhasil jalan.
-- **Stream Health Check** — polling setiap 30 detik mendeteksi stream yang stale (tidak ada output FFmpeg selama 5 menit). Stream stale otomatis di-kill dan masuk retry logic.
-- **Shuffle Playlist** — opsi shuffle di playlist. Kalau aktif, video berikutnya dipilih acak (bukan sequential). Bisa di-toggle dari halaman playlist detail. Kolom baru `playlists.shuffle`.
-- **Video Folders** — organisasi library video dengan folder. Create/rename/delete folder, move video antar folder, filter library per folder. Upload langsung ke folder aktif. Tabel baru `folders`, kolom baru `videos.folder_id`.
-- **Video Thumbnails** — auto-generate thumbnail (320px JPEG) dari frame video saat upload dan setelah Prepare. Ditampilkan di library table. Thumbnail diambil dari ~10% durasi video. Bisa regenerate manual via tombol. Disimpan di `public/uploads/thumbs/`, kolom baru `videos.thumbnail`.
-- **Stream Duration Timer** — live counter yang menampilkan berapa lama stream sudah berjalan (🔴 2h 15m 30s). Update setiap detik via JavaScript. Tampil di halaman Streams (single + playlist) dan Dashboard. Format adaptif: detik → menit → jam → hari.
-- **Chunked Upload (Resumable)** — file > 50 MB otomatis di-upload dalam chunk 10 MB. Progress bar dengan speed + ETA. Bisa dibatalkan mid-upload. Chunk disimpan sementara di `public/uploads/chunks/`, di-merge saat finalize. Auto-cleanup session stale (24 jam). File kecil tetap pakai XHR upload biasa. Module baru: `src/chunkUpload.js`.
-- **Import video dari URL** — support Google Drive, Mega.nz, MediaFire, dan direct link. Server-side download via `axios` + `megajs`. Progress tracking per job. Module baru: `src/downloader.js`.
-- **Playlist management** — halaman `/playlists` untuk create/delete playlist, `/playlists/:id` untuk add/remove/reorder video. Tabel baru: `playlists`, `playlist_items`.
-- **Stream — Playlist mode** — halaman `/streams/playlist` terpisah dari single video. Stream dari playlist auto-advance ke video berikutnya secara sequential. Option `loop_playlist` untuk wrap around ke awal.
-- **Stream — Single Video** split — halaman `/streams/single` khusus untuk stream single video. Sidebar sub-menu: Single Video + Playlist.
-- **Codec validation** sebelum stream start di Copy mode. `transcoder.validateCodec(path)` cek H.264 video + AAC audio via ffprobe. Kalau gagal, redirect dengan error message yang jelas.
-- **Auto-detect source resolution** — `transcoder.probeVideoInfo(path)` probe width, height, fps, duration, videoCodec, audioCodec dalam satu call. Data disimpan di kolom `videos.src_width`, `src_height`, `src_fps`.
-- **Auto-suffix duplicate titles** — fungsi `uniqueTitle(base)` di route videos otomatis append ` (2)`, ` (3)`, dst kalau title sudah ada.
-- **Job detail modal** — klik video yang sedang transcoding buka modal dengan progress bar + FFmpeg log inline + ETA estimasi. Endpoint baru: `GET /videos/:id/status` (gabungan progress + log tail).
-- **System monitor real-time** — dashboard menampilkan CPU%, RAM%, Uptime. Endpoint `GET /api/system` di-poll setiap 3 detik oleh inline JS di `dashboard.ejs`.
-- **Sidebar layout** dengan sub-menus — Videos: Library (`/videos`) + Playlists (`/playlists`). Streams: Single Video (`/streams/single`) + Playlist (`/streams/playlist`).
-- **Custom confirm modal** menggantikan native `window.confirm()`. Form opt-in pakai `data-confirm="..."` + `data-confirm-title` + `data-confirm-action`. Konsisten dengan tema dark.
-- **Toast notification** untuk flash messages (notice / error). Muncul di pojok kanan atas dengan slide-in animation, auto-dismiss 4 detik, tombol close manual. URL cleanup via `history.replaceState` (hapus query params setelah toast muncul). Mobile jadi bottom sheet.
-- **Upload progress bar** di modal Upload video. Pakai XMLHttpRequest `upload.onprogress` — tampilkan persen, bytes uploaded, speed (MB/s). Bisa cancel di tengah upload.
-- **Modal dialogs** (native `<dialog>`) untuk semua form New/Edit. Konsisten, no framework. Trigger via `data-open-modal`, close via `data-close-modal` / ESC / backdrop click.
-- **Prepare button contextual** — tombol "Prepare" di row video berubah jadi "Re-Prepare" (muted link) kalau status `ready`, "Retry Prepare" (primary) kalau `error`.
-- **Prepare preset compatibility note** — live note di form Prepare tentang apakah preset cocok dengan source resolution (misal: source 720p → preset 1080p = upscale warning).
-- **Table column classes** (`col-title`, `col-date`, `col-size`, `mono`) dengan ellipsis + 2-line clamp untuk cegah overflow.
-- Script baru: `scripts/test-codec.js` — standalone codec validation test.
-- Script baru: `scripts/render-check.js` — verify EJS templates render tanpa error.
-- Dependency baru: `axios` ^1.16.0 (HTTP download), `megajs` ^1.3.10 (Mega.nz download).
-- Kolom baru: `streams.playlist_id` (FK ke playlists), `videos.src_width`, `videos.src_height`, `videos.src_fps`.
-- Video status baru: `downloading` (saat import URL sedang berjalan).
-- Dokumentasi: `AGENTS.md`, `docs/architecture.md`, `docs/codebase.md`, `docs/services.md`, `docs/deployment.md`, `CHANGELOG.md` untuk onboarding AI / kontributor baru.
+### Added — Video library & organization
+- **Video Folders** — organisasi library video dengan folder (mirip File Explorer). Create/rename/delete folder, move video antar folder, filter library per folder. Upload langsung ke folder aktif. Bulk actions per folder: Prepare all, Create playlist dari folder, Delete semua videos. Tabel baru `folders`, kolom baru `videos.folder_id`.
+- **Video Thumbnails** — auto-generate thumbnail 1280×720 JPEG dari frame video saat upload dan setelah Prepare. Extract frame di ~10% durasi (min 1s, max 30s), fallback ke frame 0 kalau seek gagal. Async via `setImmediate()` supaya tidak blocking upload response. Display 160×90 di library table, 60×34 di playlist picker, 80×45 di playlist items. Manual regen + bulk script `scripts/generate-thumbs.js`. Disimpan di `public/uploads/thumbs/`, kolom baru `videos.thumbnail`.
+- **Video Preview Player** — klik thumbnail di library buka modal dengan native HTML5 `<video>` + controls. Preload metadata untuk efficient load, browser handle range requests via Express static. Hover thumbnail menampilkan ▶ overlay.
+- **Pagination library** — 20 video per halaman di `/videos` dengan smart ellipsis (`← Prev 1 … 4 5 [6] 7 8 … 20 Next →`). URL `?page=N`, compatible dengan `?folder=X`.
+
+### Added — Playlist redesign
+- **Create playlist dengan multi-video picker** — modal all-in-one. Bikin playlist baru sekaligus pilih beberapa video (checkbox + thumbnail + size + duration + search filter). Helper Select all / Clear + counter "N selected".
+- **Manage playlist modal** — edit isi playlist lewat modal AJAX. Fetch state via `GET /playlists/:id/state.json`, save via `POST /playlists/:id/sync` (diff add/remove). Tidak perlu buka halaman detail.
+- **Shuffle mode** — opsi shuffle di playlist. Kalau aktif, `advancePlaylist()` pick random video (exclude current). Bisa di-toggle dari modal create/edit. Kolom baru `playlists.shuffle`.
+- **Collage thumbnail** — playlist list thumbnail adalah collage 2×2 dari 4 video pertama. Layout adaptif: 1 video = full, 2 = split, 3 = 1 besar + 2 stacked, 4+ = grid 2×2. Pure CSS grid, tidak generate composite image.
+
+### Added — Streaming
+- **Auto-Retry + Health Check** — FFmpeg crash (exit code non-zero) trigger auto-retry hingga 5x dengan exponential backoff (3s → 60s max + jitter). User stop = no retry (flag `retryStopped`). Retry attempt di `last_error`. Reset otomatis setelah stream berhasil jalan. Health check polling 30 detik detect stale stream (no FFmpeg output 5 menit) → SIGKILL → retry logic.
+- **Stream Duration Timer** — live counter 🔴 2h 15m 30s via client-side JS. Update setiap 1 detik. Format adaptif (detik → menit → jam → hari). Tampil di `/streams/single`, `/streams/playlist`, Dashboard recent streams.
+- **Stream Log modal** — view log FFmpeg via modal (bukan buka tab baru). Auto-refresh 3 detik untuk stream running, fetch once untuk idle. Toggle auto-scroll. Stream key selalu redacted.
+- **Stream Edit modal** — edit config stream tanpa harus delete + recreate. Guard: tidak bisa edit kalau sedang running.
+- **Icon-only stream actions** — replace Start/Stop/Log/Edit/Delete text buttons dengan `.btn-icon` variants + tooltip. Stream key input dengan show/hide toggle (eye icon, global handler).
+
+### Added — History & monitoring
+- **Stream History** — riwayat semua sesi streaming yang sudah selesai. Otomatis tercatat saat stream stop (manual atau natural finish) atau error via `saveHistory()` di `streamManager`. Halaman `/history` menampilkan stream name, video, platform, durasi, status, waktu. Bisa hapus per-entry atau clear all. **Minimum 10 detik durasi** untuk tercatat. Tabel baru `stream_history`.
+- **SSE real-time dashboard** — `GET /api/events` endpoint push system snapshot setiap 3 detik (CPU, RAM, Disk, Network, Uptime). Client try SSE first, fallback ke polling `/api/system` on error. Auth via session cookie check (bukan `requireAuth`) untuk avoid session store locking.
+- **Network throughput monitor** — baca `/proc/net/dev`, hitung delta bytes/sec antar tick. Per-connection `lastNet` untuk SSE, global `lastNetSample` untuk polling. Idle label kalau 0 B/s.
+- **Disk usage monitor** — parse output `df` command, tampil di dashboard (used/total + percent).
+- **Recent streams dashboard** — redesigned dengan thumbnail 140×79 + platform capitalized (YouTube/Facebook/Twitch) + icon actions (Start/Stop + external link).
+
+### Added — Logging & deploy
+- **HTTP request logger (morgan)** — NestJS-style custom format `[AwanStream] - date LOG METHOD URL status - Nms - IP: x` dengan colored status codes (2xx/3xx cyan, 4xx yellow, 5xx red), integer latency, skip static assets. IP detection via `x-forwarded-for` + `req.ip`.
+- **GitLab CI/CD pipeline** — `.gitlab-ci.yml` dengan 3 stage: test (smoke + render-check), build (Docker image push ke Container Registry), deploy (SSH + docker compose up). Required variables: `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_PATH`, `DEPLOY_SSH_KEY` (File type), `SESSION_SECRET`, `APP_PORT`, `APP_TZ`, `APP_TZ_LABEL`. Sanity check di `before_script` exit dengan pesan jelas kalau `DEPLOY_SSH_KEY` empty (Protected variable issue).
+- **Dockerfile** multi-stage dengan `node:20-alpine` + `ffmpeg`. Image size ≈114 MB. Non-root user `awanstreamuser`. Healthcheck via HTTP GET `/login`.
+- **docker-compose.yml** — volume mount `db/`, `logs/`, `public/uploads/` untuk persistence.
 
 ### Changed
-- Layout shell: sidebar + topbar + content area (bukan top nav + container).
-- Streams split menjadi dua halaman: `/streams/single` dan `/streams/playlist`. Route `GET /streams` redirect ke `/streams/single`.
-- Videos sidebar sub-menu: Library (`/videos`) + Playlists (`/playlists`).
-- Stream list: header kolom "Started" → "Last run", menampilkan `stopped_at` kalau stream sudah berhenti.
-- Form New Stream / Upload / New Schedule pindah dari inline card ke modal floating dengan tombol Save/Cancel.
-- Dashboard diperkaya: disk usage total, next pending schedule, system monitor widget.
-- `streamManager.startStream()` sekarang handle playlist auto-advance via internal `advancePlaylist()`.
+- Dashboard redesign: stat cards dengan colored icons + system monitor SSE + recent streams dengan thumbnail + icon actions.
+- Platform presets di `src/routes/streams.js` sekarang object `{ label, url }` dengan label capitalized. YouTube URL confirmed `rtmp://x.rtmp.youtube.com/live2` (letter `x`).
+- Stream actions di tabel jadi icon-only dengan tooltip (sebelumnya text buttons).
+- Playlist list dengan collage thumbnail 2×2 (sebelumnya plain text).
+- Upload modal: video title field optional (auto-detect dari filename) + folder selector.
 
-### Progress bar transcode & scheduled streaming
-- **Progress bar transcode** — polling endpoint `GET /videos/:id/progress` yang parse `-progress pipe:1` dari FFmpeg. UI menampilkan persentase, elapsed/total, speed (x), fps. Duration di-probe via ffprobe saat upload dan dicache di kolom `videos.duration_seconds`.
-- **Scheduled streaming** — halaman `/schedules` untuk mengatur auto-start / auto-stop stream pada waktu tertentu. Input pakai datetime-local (zona lokal user, di-parse pakai `TZ` env) → simpan UTC ISO di DB. Scheduler polling tiap 15 detik.
-- Module baru: `src/scheduler.js` (reconcile + tick loop), `src/routes/schedules.js` (CRUD).
-- Tabel baru: `schedules` (stream_id, start_at UTC, stop_at UTC, status, last_error).
-- Scheduler state machine: `pending → started → done | error | cancelled`.
-- Link "Schedules" di nav utama.
+### Fixed
+- SSE endpoint "login-login sendiri" bug — caused by `requireAuth` middleware redirect + session store locking saat multiple concurrent SSE. Fix: manual cookie check di endpoint SSE, tidak pakai middleware.
+- FFmpeg "Unknown cover type" warning saat stream — via `-map 0:v:0 -map 0:a:0?` skip attachment stream.
+- Timezone inconsistency — semua timestamp render via `formatTime()` helper dari `app.locals`, format `DD/MM/YYYY HH.mm.ss WIB` (Indonesian locale, 24-hour, dots separator).
+
+### Removed / Reverted
+- Chart.js dashboard — user decided "gak worth it ada chart dan import CDN", revert ke plain stat cards + system monitor.
+- Chunked upload client-side — reverted ke simple XHR upload karena issue stuck. Backend endpoints dan `src/chunkUpload.js` **tetap ada** untuk future re-enable.
+
+### Earlier features in this release cycle
+
+- **Import video dari URL** — Google Drive, Mega.nz, MediaFire, direct link. Module: `src/downloader.js`. State `jobs: Map<jobId, ...>`. Video row di-insert dengan status `downloading` langsung, update ke `uploaded` setelah selesai.
+- **Playlist management basic** — CRUD playlist + playlist_items (add/remove/reorder). Tabel baru: `playlists`, `playlist_items`.
+- **Stream — Playlist mode** — halaman `/streams/playlist` terpisah dari single video. Auto-advance sequential dengan option `loop_playlist`.
+- **Stream — Single Video split** — halaman `/streams/single` terpisah. Sidebar sub-menu: Single Video + Playlist.
+- **Codec validation** sebelum stream start di Copy mode. `transcoder.validateCodec(path)` cek H.264 + AAC via ffprobe.
+- **Auto-detect source resolution** — `transcoder.probeVideoInfo(path)` full media probe dalam satu call. Disimpan di `videos.src_width`, `src_height`, `src_fps`.
+- **Auto-suffix duplicate titles** — `uniqueTitle(base)` append ` (2)`, ` (3)`, dst.
+- **Job detail modal** — klik video yang transcoding buka modal dengan progress bar + log tail + ETA. Endpoint `GET /videos/:id/status`.
+- **Sidebar layout** dengan sub-menus (Videos, Streams).
+- **Custom confirm modal** replace `window.confirm()` — opt-in via `data-confirm="..."` attribute.
+- **Toast notification** untuk flash messages, auto-dismiss 4 detik, URL cleanup via `history.replaceState`.
+- **Upload progress bar** via XMLHttpRequest `upload.onprogress`.
+- **Modal dialogs** native `<dialog>` untuk semua form.
+- **Prepare button contextual** — "Prepare" / "Re-Prepare" / "Retry Prepare" berdasarkan status.
+- **Prepare preset compatibility note** — live warning kalau preset > source (upscale).
+- Dependency baru: `morgan` ^1.10 (HTTP logger), `axios` ^1.16 (HTTP download), `megajs` ^1.3 (Mega.nz download).
+- Kolom baru: `streams.playlist_id`, `videos.src_width`, `src_height`, `src_fps`, `thumbnail`, `folder_id`, `playlists.shuffle`.
+- Video status baru: `downloading`.
+- Dokumentasi baru: `docs/features.md` (per-feature reference), update `AGENTS.md`, `docs/architecture.md`, `docs/codebase.md`, `docs/services.md`, `docs/deployment.md` (GitLab CI section).
 
 ## 2026-05-11
 

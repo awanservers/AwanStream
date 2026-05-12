@@ -551,6 +551,91 @@ sudo kill -9 <PID>
 
 ---
 
+## GitLab CI/CD (test → build → deploy)
+
+Repo ini sudah di-setup untuk auto-deploy via GitLab Runner. Pipeline 3 stage di `.gitlab-ci.yml`:
+
+1. **test** — install deps + `node scripts/smoke.js` + `node scripts/render-check.js`. Jalan di semua branch.
+2. **build** — `docker build` → push ke GitLab Container Registry (`$CI_REGISTRY_IMAGE`). Hanya di default branch (`main`).
+3. **deploy** — SSH ke server production → update `.env` dari CI variables → `docker compose pull && up -d`. Hanya di default branch.
+
+### Required CI/CD Variables
+
+Set di **Settings → CI/CD → Variables** di GitLab project:
+
+| Variable | Type | Protected | Masked | Value example |
+|---|---|---|---|---|
+| `DEPLOY_HOST` | Variable | ✓ | — | `stream.example.com` atau IP |
+| `DEPLOY_USER` | Variable | ✓ | — | `awan` (SSH user di server) |
+| `DEPLOY_PATH` | Variable | ✓ | — | `/home/awan/awanstream` |
+| `DEPLOY_SSH_KEY` | **File** | ✓ | — | isi private key (`-----BEGIN ...`) |
+| `SESSION_SECRET` | Variable | ✓ | ✓ | hex 48 bytes |
+| `APP_PORT` | Variable | ✓ | — | `7575` |
+| `APP_TZ` | Variable | ✓ | — | `Asia/Jakarta` |
+| `APP_TZ_LABEL` | Variable | ✓ | — | `WIB` |
+
+**`DEPLOY_SSH_KEY` type WAJIB "File"** — bukan "Variable". GitLab akan inject sebagai path ke temp file, jadi di script pakai `chmod 400 "$DEPLOY_SSH_KEY"` dan `ssh-add "$DEPLOY_SSH_KEY"` (pakai path, bukan `echo | ssh-add -`).
+
+### Common deploy error: `chmod: : No such file or directory`
+
+Error ini muncul saat `$DEPLOY_SSH_KEY` empty di runtime. 99% penyebabnya: **variable mark "Protected" tapi branch tidak protected**. GitLab hanya inject Protected variables ke Protected branches/tags.
+
+**Fix (pilih salah satu):**
+- **Protect branch:** Settings → Repository → Protected branches → protect `main` (default branch)
+- **Unprotect variable:** Settings → CI/CD → Variables → edit `DEPLOY_SSH_KEY` → uncheck "Protect variable". Ulangi untuk semua `DEPLOY_*` variable dan `SESSION_SECRET`.
+
+`.gitlab-ci.yml` punya sanity check di awal `deploy:before_script` yang exit dengan pesan jelas kalau `$DEPLOY_SSH_KEY` kosong.
+
+### Server prerequisites
+
+Server target perlu:
+- Docker + `docker compose` plugin (`docker compose version`)
+- SSH access untuk `DEPLOY_USER` dengan public key dari pair `DEPLOY_SSH_KEY`
+- `DEPLOY_PATH` directory writable oleh user
+- Outbound network ke RTMP endpoints (1935, 443)
+
+Pertama kali setup server:
+```bash
+# Generate SSH key di local
+ssh-keygen -t ed25519 -f ~/.ssh/awanstream_deploy -C "gitlab-ci@awanstream"
+# Copy public key ke server
+ssh-copy-id -i ~/.ssh/awanstream_deploy.pub awan@stream.example.com
+# Paste private key content ke GitLab variable DEPLOY_SSH_KEY (type File)
+cat ~/.ssh/awanstream_deploy
+```
+
+### Image size
+
+Docker image ±114 MB (`node:20-alpine` + `ffmpeg` + `node_modules`). Ini normal — FFmpeg saja ±40 MB. Multi-stage build sudah optimal.
+
+### Runtime files di server
+
+Setelah deploy pertama, di `DEPLOY_PATH` akan ada:
+- `.env` — generated dari CI variables
+- `docker-compose.yml` — scp dari repo
+- `db/`, `logs/`, `public/uploads/` — volume mount (persist antar deploy)
+
+Admin user pertama **tidak otomatis** dibuat. Setelah deploy pertama, SSH ke server lalu:
+```bash
+cd /home/awan/awanstream
+docker compose exec awanstream node reset-password.js
+```
+
+### Manual deploy (tanpa CI)
+
+Kalau pipeline gagal dan perlu hotfix langsung:
+```bash
+# Di server
+cd /home/awan/awanstream
+docker login registry.gitlab.com
+docker pull registry.gitlab.com/<namespace>/<project>:latest
+docker compose down
+docker compose up -d
+docker compose logs -f
+```
+
+---
+
 ## Quick reference
 
 | Task | systemd | pm2 | docker |

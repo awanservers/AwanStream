@@ -71,36 +71,45 @@ Set `res.locals.currentUser = { id, username }` atau `null`. Wajib di-register s
 
 ## `src/streamManager.js`
 
-**Purpose:** lifecycle manager untuk FFmpeg child process yang push video → RTMP endpoint.
+**Purpose:** lifecycle manager untuk FFmpeg child process yang push video → RTMP endpoint. Handle auto-retry, health check, playlist advance, dan stream history.
 
 ### State
 
-- `running: Map<streamId, { process, logStream }>` — in-memory, tidak dipersist. Hilang saat restart, di-reconcile via `reconcileOnBoot()`.
+- `running: Map<streamId, { process, logStream, startedAt, lastActivity }>` — in-memory, tidak dipersist. Hilang saat restart, di-reconcile via `reconcileOnBoot()`.
+- `retryCount: Map<streamId, number>` — attempt counter per stream, reset ke 0 setelah berhasil jalan.
+- `retryStopped: Set<streamId>` — flag user stop (skip auto-retry).
+- `retryTimers: Map<streamId, NodeJS.Timeout>` — pending retry setTimeout handles.
 
 ### Exports
 
 ```js
 const streamManager = require('./streamManager');
-// Methods: startStream, stopStream, isRunning, reconcileOnBoot, tailLog
+// Methods: startStream, stopStream, isRunning, reconcileOnBoot, tailLog,
+//          startHealthCheck, stopHealthCheck
 ```
 
 #### `startStream(stream, videoPath)` → `void`
 
-- `stream` = row dari tabel `streams` (harus punya `id`, `rtmp_url`, `stream_key`, `re_encode`, `video_bitrate`, `keyframe_interval`, `preset`, `loop_video`)
+- `stream` = row dari tabel `streams`
 - `videoPath` = path absolut ke file video
 - **Throws:**
   - `Error('Stream already running')` — kalau `isRunning(id)` sudah true
   - `Error('Video file not found: ...')` — kalau `videoPath` tidak exist
 - **Side effects:**
-  - Spawn `ffmpeg` child
-  - Tulis log ke `logs/stream-<id>.log` (stream key di-redact)
+  - Spawn `ffmpeg` child, simpan `startedAt`, setup activity tracking via `stdout/stderr.on('data')` update `lastActivity`
+  - Tulis log ke `logs/stream-<id>.log` (stream key di-redact via `makeRedactingStream`)
   - UPDATE `streams` SET `status='running'`, `started_at=CURRENT_TIMESTAMP`
-  - On exit: UPDATE status `idle` / `error` sesuai exit code
+  - On exit normal (code 0): cek `advancePlaylist(stream)` — kalau playlist punya next, start video berikutnya
+  - On exit error (code non-zero) + bukan user stop: trigger `scheduleRetry(streamId, videoPath)`
+  - On exit final (no retry / max retries): `saveHistory(stream, status, errorMsg)` dan UPDATE status
 
 #### `stopStream(streamId)` → `boolean`
 
+- Mark `retryStopped.add(streamId)` agar exit handler tidak trigger retry
+- Cancel pending retry timer kalau ada
 - Set `status='idle'` di DB dulu (supaya exit handler tidak overwrite ke `error`)
 - SIGTERM ke child process kalau masih ada
+- `saveHistory()` dengan status `completed`
 - Return `true` kalau ada process yang di-kill, `false` kalau memang tidak running
 
 #### `isRunning(streamId)` → `boolean`
@@ -115,11 +124,23 @@ UPDATE semua row `status='running'` menjadi `idle` dengan `stopped_at=now`. Pang
 
 Baca tail file log. Redact stream key sebelum return (defense in depth kalau ada log lama sebelum redaction aktif).
 
-### Internal helpers (tidak di-export, tapi penting dipahami)
+#### `startHealthCheck()` / `stopHealthCheck()` → `void`
+
+Idempotent. Mulai `setInterval` 30 detik yang iterasi `running` Map, check `lastActivity` > 5 menit lalu → SIGKILL child (exit handler lalu trigger retry). Panggil sekali di `app.js` startup.
+
+### Internal helpers
 
 - `buildRtmpTarget(url, key)` — gabung URL + key dengan normalisasi trailing slash
 - `redact(text, secret)` — regex replace occurrence `secret` → `***REDACTED***`
 - `makeRedactingStream(logStream, secret)` — writer wrapper. **Semua tulisan log ffmpeg wajib lewat ini.**
+- `advancePlaylist(stream)` → `boolean` — cek `playlists.shuffle`:
+  - Shuffle on → pick random item (exclude current kalau > 1 item)
+  - Shuffle off → next position sequential
+  - Kalau `loop_playlist=1` dan sudah di akhir → wrap ke posisi 0
+  - Return `false` kalau tidak ada next (playlist non-loop selesai)
+- `saveHistory(stream, status, errorMsg)` — insert row `stream_history` kalau durasi >= 10 detik. Fields: `stream_id`, `stream_name`, `video_title`, `platform`, `started_at`, `stopped_at`, `duration_seconds`, `status` (`completed` | `error`), `last_error`.
+- `getRetryDelay(attempt)` → number (ms) — exponential backoff: `min(3000 * 2^attempt, 60000) + jitter(0..1000)`.
+- `scheduleRetry(streamId, videoPath)` → schedule setTimeout berdasarkan `retryCount`. Max 5 attempts. Setelah max atau user stop → tidak retry lagi.
 
 ### FFmpeg args ringkasan
 
@@ -169,7 +190,8 @@ Baca tail file log. Redact stream key sebelum return (defense in depth kalau ada
 ```js
 const transcoder = require('./transcoder');
 // Methods: presets, start, cancel, isRunning, reconcileOnBoot, tailLog,
-//          getProgress, probeDuration
+//          getProgress, probeDuration, probeVideoInfo, validateCodec,
+//          generateThumbnail
 ```
 
 #### `presets()` → `object`
@@ -222,6 +244,45 @@ Return current in-memory progress atau `null` kalau job tidak running. Shape:
 #### `probeDuration(filePath)` → `number | null`
 
 Synchronous `ffprobe` call. Return detik (float) atau null kalau file tidak bisa diprobe. Dipakai di route `POST /videos/upload` dan di dalam `start(...)`.
+
+#### `probeVideoInfo(filePath)` → `object | null`
+
+Full media probe dalam satu call. Return:
+```js
+{
+  width: 1920,
+  height: 1080,
+  fps: 30,
+  duration: 300.5,
+  videoCodec: 'h264',
+  audioCodec: 'aac',
+}
+```
+Dipakai di route upload, URL import, dan form Prepare untuk auto-detect source info.
+
+#### `validateCodec(filePath)` → `object`
+
+Cek H.264 video + AAC audio via ffprobe (sync, timeout 30s). Return:
+```js
+{
+  ok: true | false,
+  issues: ['Video codec is hevc (expected h264)', ...],  // empty kalau ok
+  info: { videoCodec, audioCodec, width, height },
+}
+```
+Dipakai di `streams.js` `POST /:id/start` saat Copy mode aktif. Redirect dengan error kalau `ok === false`.
+
+#### `generateThumbnail(videoPath, videoId)` → `Promise<string | null>`
+
+Extract 1 frame dari video ke JPEG 1280×720 di `public/uploads/thumbs/thumb_<id>.jpg`. Update kolom `videos.thumbnail`. Return filename atau `null` kalau gagal.
+
+- Seek ke `min(duration * 0.10, 30)` detik (skip intro kalau video panjang, min 1s)
+- Fallback ke frame 0 kalau seek gagal (video sangat pendek)
+- Filter: `scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:black`
+- Quality: `-q:v 3` (≈ high quality JPEG)
+- Timeout: 20 detik (kalau lewat → kill + resolve null)
+- Dipanggil async via `setImmediate()` setelah upload response terkirim (non-blocking)
+- Dipanggil juga otomatis setelah Prepare sukses (karena source file ditimpa)
 
 ### FFmpeg args ringkasan
 
@@ -293,6 +354,151 @@ UPDATE `status='started'` → `status='error'` dengan `last_error='server restar
 
 ---
 
+## `src/downloader.js`
+
+**Purpose:** import video dari URL (Google Drive, Mega, MediaFire, direct link).
+
+### State
+
+- `jobs: Map<jobId, { videoId, source, progress, cancel, error, finishedAt }>` — job stays in Map 30 detik setelah selesai supaya client bisa poll final status.
+
+### Exports
+
+```js
+const downloader = require('./downloader');
+// Methods: start, getProgress, isRunning, detectSource, reconcileOnBoot
+```
+
+#### `start(url, title)` → `{ jobId, videoId, source }`
+
+- Detect source via `detectSource(url)`, throw kalau tidak recognized
+- INSERT row `videos` dengan `status='downloading'` dan `filename=null` sementara
+- Mulai download async (fire-and-forget)
+- Return `{ jobId, videoId, source }` immediately supaya client bisa redirect dengan progress ID
+
+**Throws:** `Error('Unsupported URL')`, `Error('Title required')`.
+
+#### `getProgress(jobId)` → `object | null`
+
+```js
+{
+  percent: 42,         // 0-100 atau null kalau total tidak diketahui
+  downloaded: 12345,   // bytes
+  total: 29876,        // bytes (null kalau server tidak send Content-Length)
+  status: 'downloading' | 'done' | 'error',
+  error: '...',        // optional
+}
+```
+
+#### `isRunning(jobId)` → `boolean`
+
+#### `detectSource(url)` → `'gdrive' | 'mega' | 'mediafire' | 'direct' | null`
+
+Match regex: `drive.google.com` / `mega.nz` / `mediafire.com` / `^https?://`. Return source key atau `null`.
+
+#### `reconcileOnBoot()` → `void`
+
+UPDATE `status='downloading'` → `status='error'` dengan `last_error='download interrupted by server restart'`.
+
+### Behavior per source
+
+- **Google Drive** — extract file ID dari `/file/d/<ID>/` atau `?id=<ID>`. Fetch og:title untuk filename default. Multi-URL fallback: `drive.usercontent.google.com/download` → `drive.google.com/uc?export=download`. Handle cookie warning page untuk file besar (virus scan bypass).
+- **Mega.nz** — `megajs.File.fromURL(url)` → `loadAttributes()` → `download({ stream: true })` → pipe ke disk.
+- **MediaFire** — fetch halaman, extract download button `href` via regex, follow ke URL final.
+- **Direct URL** — axios GET stream, pipe langsung ke disk.
+
+Setelah sukses: update `size_bytes`, `probeVideoInfo()` cache width/height/fps/duration, set `status='uploaded'`, generate thumbnail async.
+
+---
+
+## `src/chunkUpload.js`
+
+**Purpose:** chunked upload untuk file > 50 MB (currently disabled di client-side, backend endpoints masih aktif untuk future re-enable).
+
+### State
+
+- `sessions: Map<sessionId, { title, fileName, totalSize, chunkSize, totalChunks, receivedChunks: Set<number>, folderId, createdAt }>`
+- Folder chunks di `public/uploads/chunks/<sessionId>/chunk_000000`, `chunk_000001`, ...
+
+### Exports
+
+```js
+const chunkUpload = require('./chunkUpload');
+// Methods: initSession, saveChunk, getStatus, finalize, cancel, reconcileOnBoot
+```
+
+#### `initSession({ title, fileName, totalSize, chunkSize, folderId })` → `{ sessionId, totalChunks }`
+
+Bikin session, siapkan folder chunks. `sessionId` = md5 hex dari timestamp + fileName. Default `chunkSize = 10 * 1024 * 1024` (10 MB).
+
+#### `saveChunk(sessionId, chunkIndex, buffer)` → `{ received, total }`
+
+Write `buffer` ke `chunks/<sessionId>/chunk_<index.padStart(6,'0')>`, add ke `receivedChunks`.
+
+**Throws:** `Error('Session not found')`, `Error('Chunk out of range')`.
+
+#### `getStatus(sessionId)` → `{ received, total, receivedChunks: number[] }`
+
+Dipakai client untuk resume — skip chunk yang sudah terkirim. Return array indexed supaya client bisa tahu mana yang missing.
+
+#### `finalize(sessionId)` → `{ videoId, filename }`
+
+- Verify semua chunk received (throw kalau incomplete)
+- Merge semua chunk sequentially → file final di `public/uploads/<timestamp>_<sanitized>`
+- Delete folder chunks
+- INSERT row `videos` dengan `status='uploaded'`, probe video info async, generate thumbnail async
+- Return `{ videoId, filename }`
+
+**Throws:** `Error('Incomplete upload, received N / M chunks')`.
+
+#### `cancel(sessionId)` → `void`
+
+Delete session + folder chunks. Aman dipanggil kapanpun.
+
+#### `reconcileOnBoot()` → `void`
+
+Scan `public/uploads/chunks/` untuk folder > 24 jam → delete. Dipanggil di `app.js` startup.
+
+---
+
+## System monitor & SSE
+
+Implemented langsung di `app.js`, bukan module terpisah.
+
+### `GET /api/system` (polling endpoint)
+
+Return JSON snapshot:
+```js
+{
+  cpu: 42.5,            // percent, dari os.loadavg()[0] / cpuCount * 100
+  memory: 65.2,         // percent, dari (totalmem - freemem) / totalmem * 100
+  memoryUsedGB: 5.2,
+  memoryTotalGB: 8.0,
+  uptime: 3600,         // seconds, dari os.uptime()
+  disk: { total, used, free, percent },   // dari 'df' command
+  network: { rxPerSec, txPerSec, label },  // 'Idle' kalau 0, else "X MB/s ↓ Y MB/s ↑"
+}
+```
+
+Network throughput dihitung dari delta `/proc/net/dev` antara call sebelumnya dan sekarang (global `lastNetSample`).
+
+### `GET /api/events` (SSE endpoint)
+
+Server-Sent Events stream yang push system snapshot setiap 3 detik.
+
+**Auth:** manual check `req.session.userId` — **bukan** `requireAuth` middleware. Alasan: `requireAuth` redirect ke `/login` untuk HTML requests, tapi SSE pakai Accept `text/event-stream` dan butuh respons berbeda. Selain itu ada isu session store locking kalau multiple concurrent SSE dengan auth middleware.
+
+Per-connection state `lastNet` untuk hitung delta throughput isolated per client (supaya multiple tab tidak konflik).
+
+Client pattern di `views/dashboard.ejs`:
+```js
+const es = new EventSource('/api/events');
+es.onmessage = e => { /* update DOM */ };
+es.onerror = () => { es.close(); startPolling(); };  // fallback
+```
+
+---
+
 ## Route layer — `src/routes/`
 
 Route bukan "service" murni, tapi pola kontraknya tetap perlu didokumentasikan.
@@ -328,24 +534,68 @@ Kenapa redirect bukan JSON:
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/videos` | List + upload form |
-| POST | `/videos/upload` | multer upload → probe duration → INSERT |
+| GET | `/videos` | List dengan pagination 20/page + folder filter |
+| POST | `/videos/upload` | multer upload → probe → generate thumbnail async → INSERT |
+| POST | `/videos/import-url` | `downloader.start(url, title)` |
+| GET | `/videos/download/:jobId/progress` | JSON download progress |
 | POST | `/videos/:id/prepare` | `transcoder.start(...)` |
 | POST | `/videos/:id/cancel-prepare` | `transcoder.cancel(...)` |
 | GET | `/videos/:id/prepare-log` | `text/plain` tail |
-| GET | `/videos/:id/progress` | JSON `{status, running, percent, time, duration, speed, fps, last_error}` |
-| POST | `/videos/:id/delete` | unlink file + DELETE row |
+| GET | `/videos/:id/progress` | JSON progress snapshot |
+| GET | `/videos/:id/status` | JSON progress + log tail + ETA (job detail modal) |
+| POST | `/videos/:id/edit` | Rename + move folder |
+| POST | `/videos/:id/regen-thumb` | Manual trigger `generateThumbnail()` |
+| POST | `/videos/:id/move-folder` | Single-video folder change |
+| POST | `/videos/:id/delete` | unlink file + thumbnail + DELETE row |
+| POST | `/videos/folders/create` | Create folder |
+| POST | `/videos/folders/:id/rename` | Rename folder |
+| POST | `/videos/folders/:id/delete` | Delete folder (video dipindah ke unfiled) |
+| POST | `/videos/folders/:id/prepare-all` | Bulk prepare semua `uploaded` di folder |
+| POST | `/videos/folders/:id/create-playlist` | Create playlist dengan nama folder |
+| POST | `/videos/folders/:id/delete-videos` | Hapus semua video di folder |
+| POST | `/videos/chunked/init` | Init chunked upload session |
+| GET | `/videos/chunked/:id/status` | Status untuk resume |
+| PUT | `/videos/chunked/:id/:chunkIndex` | Save chunk |
+| POST | `/videos/chunked/:id/finalize` | Merge + insert row |
+| DELETE | `/videos/chunked/:id` | Cancel + cleanup |
 
 ### `src/routes/streams.js`
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/streams` | List + new stream form |
-| POST | `/streams` | INSERT row |
-| POST | `/streams/:id/start` | `streamManager.startStream(...)` |
+| GET | `/streams` | Redirect ke `/streams/single` |
+| GET | `/streams/single` | List single-video streams |
+| GET | `/streams/playlist` | List playlist streams |
+| POST | `/streams` | INSERT row (auto-detect single vs playlist dari body) |
+| POST | `/streams/:id/start` | Codec validation + `streamManager.startStream(...)` |
 | POST | `/streams/:id/stop` | `streamManager.stopStream(...)` |
-| POST | `/streams/:id/delete` | stop + DELETE row |
-| GET | `/streams/:id/log` | `text/plain` tail (redacted) |
+| POST | `/streams/:id/edit` | Update config (guard: tidak bisa edit kalau running) |
+| POST | `/streams/:id/delete` | Stop + DELETE row |
+| GET | `/streams/:id/log` | `text/plain` tail (redacted, dipakai modal auto-refresh 3s) |
+
+### `src/routes/playlists.js`
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/playlists` | List dengan collage thumbnail |
+| POST | `/playlists` | Create dengan multi-video picker (`video_ids[]`) |
+| GET | `/playlists/:id` | Detail dengan items ordered |
+| GET | `/playlists/:id/state.json` | JSON `{ playlist, itemIds, videos }` untuk manage modal |
+| POST | `/playlists/:id/sync` | JSON body `{ video_ids }` → diff add/remove |
+| POST | `/playlists/:id/settings` | Update name + loop + shuffle |
+| POST | `/playlists/:id/add-video` | Append item |
+| POST | `/playlists/:id/remove-item/:itemId` | Delete item |
+| POST | `/playlists/:id/move-up/:itemId` | Swap position up |
+| POST | `/playlists/:id/move-down/:itemId` | Swap position down |
+| POST | `/playlists/:id/delete` | Delete items + playlist |
+
+### `src/routes/history.js`
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/history` | List stream history (order `stopped_at DESC`) |
+| POST | `/history/:id/delete` | Delete 1 entry |
+| POST | `/history/clear` | `DELETE FROM stream_history` |
 
 ### `src/routes/schedules.js`
 
