@@ -55,6 +55,10 @@ router.post('/start', (req, res) => {
   const targetPreset = req.body.target_preset;
   const customMinutes = Number(req.body.custom_minutes);
   const customTitle = (req.body.title || '').trim() || null;
+  // Checkbox: absent (unchecked) = fast mode, present = smooth mode. Default smooth.
+  const smooth = req.body.smooth === undefined ? true : req.body.smooth === 'on' || req.body.smooth === '1' || req.body.smooth === 'true';
+  let crossfadeSeconds = Number(req.body.crossfade_seconds);
+  if (!Number.isFinite(crossfadeSeconds) || crossfadeSeconds <= 0) crossfadeSeconds = 1.0;
 
   if (!sourceVideoId) {
     return res.redirect('/looper?error=' + encodeURIComponent('Pilih video sumber dulu.'));
@@ -75,8 +79,14 @@ router.post('/start', (req, res) => {
   }
 
   try {
-    const { jobId } = looper.start(sourceVideoId, targetSeconds, customTitle);
-    return res.redirect('/looper?notice=' + encodeURIComponent(`Loop started (job #${jobId}). Video baru akan muncul di Library setelah selesai.`));
+    const { jobId, mode } = looper.start(sourceVideoId, targetSeconds, customTitle, {
+      smooth,
+      crossfadeSeconds,
+    });
+    const modeLabel = mode === 'smooth' ? 'Smooth mode (seamless crossfade)' : 'Fast mode';
+    return res.redirect('/looper?notice=' + encodeURIComponent(
+      `${modeLabel} — job #${jobId} started. Video baru akan muncul di Library setelah selesai.`
+    ));
   } catch (err) {
     return res.redirect('/looper?error=' + encodeURIComponent(err.message));
   }
@@ -97,6 +107,7 @@ router.get('/progress', (req, res) => {
     }
     return {
       jobId: j.jobId,
+      mode: j.mode,
       sourceVideoId: j.sourceVideoId,
       sourceTitle: src ? src.title : '(deleted)',
       outputVideoId: j.outputVideoId,
@@ -104,6 +115,8 @@ router.get('/progress', (req, res) => {
       outputStatus: out ? out.status : null,
       targetSeconds: j.target,
       percent: j.progress.percent,
+      phase: j.progress.phase,
+      phaseLabel: j.progress.phaseLabel,
       elapsedSec: elapsed,
       speed: j.progress.speed,
       etaSec,

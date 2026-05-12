@@ -57,7 +57,18 @@
 
         <label class="full">Title output <span class="muted small">(opsional)</span>
           <input type="text" name="title" id="title"
-                 placeholder="Kosongkan untuk auto-generate: '<Source> (loop Nh)'">
+                 placeholder="Kosongkan untuk auto-generate: '<Source> (smooth/loop Nh)'">
+        </label>
+
+        <label class="full" style="display:flex; align-items:flex-start; gap:10px; padding:12px; background:var(--panel); border:1px solid var(--border); border-radius:8px;">
+          <input type="checkbox" name="smooth" id="smooth" checked style="margin-top:3px;">
+          <span style="flex:1;">
+            <strong>Smooth mode (seamless crossfade)</strong>
+            <div class="small muted" style="margin-top:3px;">
+              Tambahkan crossfade 1 detik di loop boundary supaya transisi halus tanpa "lompatan". Phase 1 re-encode clip pendek (beberapa detik) → phase 2 loop dengan -c copy.
+              <br><em>Matikan kalau kamu butuh kecepatan maksimal dan source sudah start≈end secara natural.</em>
+            </div>
+          </span>
         </label>
 
         <div class="full" id="estimate-row" style="display:none;">
@@ -86,6 +97,7 @@
           <th>Job</th>
           <th>Source → Output</th>
           <th>Target</th>
+          <th>Phase</th>
           <th>Progress</th>
           <th>Speed</th>
           <th>ETA</th>
@@ -94,7 +106,7 @@
         <tbody>
           <% activeJobs.forEach(j => { %>
             <tr data-job-id="<%= j.jobId %>">
-              <td>#<%= j.jobId %></td>
+              <td>#<%= j.jobId %><div class="small muted"><%= j.mode %></div></td>
               <td class="small">
                 <%= j.sourceTitle %><br>
                 <span class="muted">→ <%= j.outputTitle %></span>
@@ -102,6 +114,9 @@
               <td class="small">
                 <% const t = j.target; %>
                 <%= t >= 3600 ? (t/3600).toFixed(t%3600===0?0:1) + 'h' : Math.round(t/60) + 'm' %>
+              </td>
+              <td class="small job-phase">
+                <%= j.progress.phaseLabel || '-' %>
               </td>
               <td>
                 <div class="progress">
@@ -237,6 +252,8 @@
         if (sp) sp.textContent = j.speed ? j.speed.toFixed(1) + 'x' : '-';
         const eta = row.querySelector('.job-eta');
         if (eta) eta.textContent = formatEta(j.etaSec);
+        const ph = row.querySelector('.job-phase');
+        if (ph) ph.textContent = j.phaseLabel || '-';
       });
     } catch (_) {}
   }

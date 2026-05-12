@@ -1,8 +1,20 @@
-// Video looper: take a short clip and produce a long looped version by
-// repeating it in the container (no re-encode, -c copy). Very fast because
-// the source is never decoded.
+// Video looper: take a short clip and produce a long looped version.
 //
-// Output is inserted as a new video row (not overwriting source).
+// Two modes:
+//   fast   — single FFmpeg pass, -stream_loop -1 -c copy. No re-encode, very
+//            fast, but loop boundary is visible (frame L → frame 0 jump).
+//            Best when the clip already starts and ends on similar frames.
+//   smooth — two-phase pipeline:
+//              phase 1: create a "seamless unit" (length = L-D) where the
+//                       boundary at start/end is a D-second crossfade between
+//                       the tail and the head of the source. Re-encoded to
+//                       h264+aac so it's stream-ready.
+//              phase 2: -stream_loop -1 -c copy the seamless unit to the final
+//                       target duration. Fast because no re-encode.
+//            Net result: when the clip loops, the join is inside a crossfade,
+//            so the eye never catches a hard frame jump.
+//
+// Output is inserted as a new video row (never overwrites the source).
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
@@ -13,7 +25,16 @@ const uploadDir = path.join(__dirname, '..', 'public', 'uploads');
 const logsDir = path.join(__dirname, '..', 'logs');
 if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
 
-// jobId (string) -> { process, progress, sourceVideoId, outputVideoId, target, startedAt }
+// jobId (string) ->
+// {
+//   mode: 'fast' | 'smooth',
+//   phase: 1 | 2,
+//   phaseLabel: string,
+//   process: current ffmpeg child,
+//   progress: { percent, time, duration, speed, phase, phaseLabel },
+//   sourceVideoId, outputVideoId, target, startedAt,
+//   cancelRequested: bool,
+// }
 const jobs = new Map();
 let nextJobId = 1;
 
@@ -37,6 +58,7 @@ function listJobs() {
   for (const [id, j] of jobs.entries()) {
     out.push({
       jobId: id,
+      mode: j.mode,
       sourceVideoId: j.sourceVideoId,
       outputVideoId: j.outputVideoId,
       target: j.target,
@@ -52,6 +74,7 @@ function getProgress(jobId) {
   if (!j) return null;
   return {
     jobId: String(jobId),
+    mode: j.mode,
     sourceVideoId: j.sourceVideoId,
     outputVideoId: j.outputVideoId,
     target: j.target,
@@ -59,6 +82,8 @@ function getProgress(jobId) {
     time: j.progress.time,
     duration: j.progress.duration,
     speed: j.progress.speed,
+    phase: j.progress.phase,
+    phaseLabel: j.progress.phaseLabel,
     startedAt: j.startedAt,
   };
 }
@@ -66,12 +91,15 @@ function getProgress(jobId) {
 /**
  * Start a loop job.
  *
- * @param {number} sourceVideoId   The source video row id.
- * @param {number} targetSeconds   Desired output length in seconds.
- * @param {string} [title]         Optional title for the output row.
- * @returns {{ jobId: string, outputVideoId: number, outputFilename: string }}
+ * @param {number}  sourceVideoId
+ * @param {number}  targetSeconds
+ * @param {string}  [title]
+ * @param {object}  [options]
+ * @param {boolean} [options.smooth=true]        Enable crossfade seamless loop.
+ * @param {number}  [options.crossfadeSeconds=1] Crossfade duration (smooth only).
+ * @returns {{ jobId: string, outputVideoId: number, outputFilename: string, mode: string }}
  */
-function start(sourceVideoId, targetSeconds, title) {
+function start(sourceVideoId, targetSeconds, title, options = {}) {
   const src = db.prepare('SELECT * FROM videos WHERE id=?').get(Number(sourceVideoId));
   if (!src) throw new Error('Source video not found');
 
@@ -86,8 +114,7 @@ function start(sourceVideoId, targetSeconds, title) {
     throw new Error('Target duration cannot exceed 24 hours');
   }
 
-  // Ensure we know source duration so we can estimate loop count + warn if
-  // target < source (which would be a trim, not a loop).
+  // Ensure we know source duration.
   let srcDuration = src.duration_seconds;
   if (!srcDuration) {
     srcDuration = transcoder.probeDuration(srcPath);
@@ -95,22 +122,41 @@ function start(sourceVideoId, targetSeconds, title) {
       db.prepare('UPDATE videos SET duration_seconds=? WHERE id=?').run(srcDuration, src.id);
     }
   }
-  if (srcDuration && target < srcDuration) {
+  if (!srcDuration) {
+    throw new Error('Cannot detect source duration. Probe failed.');
+  }
+  if (target < srcDuration) {
     throw new Error(`Target (${target}s) is shorter than source (${Math.round(srcDuration)}s). Pick a longer target.`);
   }
 
-  // Output filename: <timestamp>_<basename>_loop.mp4 (always mp4 container so
-  // -c copy works predictably across input formats).
+  const smooth = options.smooth !== false;
+  let crossfadeSec = Number(options.crossfadeSeconds);
+  if (!Number.isFinite(crossfadeSec) || crossfadeSec <= 0) crossfadeSec = 1.0;
+
+  // Smooth needs L > 2*D (some tail, some head, some middle). If not, shrink D
+  // to fit, or reject if still too short.
+  if (smooth) {
+    const minLen = 2 * crossfadeSec + 0.5;
+    if (srcDuration < minLen) {
+      // Try shrinking crossfade. Aim for D = floor(srcDuration/3 * 10)/10 so at
+      // least ~1/3 of clip is middle. Require ≥0.3s crossfade to be visible.
+      const shrunk = Math.floor((srcDuration / 3) * 10) / 10;
+      if (shrunk < 0.3) {
+        throw new Error(`Source (${srcDuration.toFixed(1)}s) too short for smooth mode. Use fast mode or pick a longer clip (≥2s).`);
+      }
+      crossfadeSec = shrunk;
+    }
+  }
+
+  // Insert output row up-front.
   const base = src.filename.replace(/\.[^.]+$/, '');
   const outFilename = `${Date.now()}_${base}_loop.mp4`;
   const outPath = path.join(uploadDir, outFilename);
-
-  // Resolve output title with auto-suffix if it clashes.
-  const baseTitle = (title && String(title).trim()) || `${src.title} (loop ${formatTargetLabel(target)})`;
+  const modeLabel = smooth ? 'smooth' : 'loop';
+  const baseTitle = (title && String(title).trim()) ||
+    `${src.title} (${modeLabel} ${formatTargetLabel(target)})`;
   const finalTitle = uniqueVideoTitle(baseTitle);
 
-  // Insert output video row up-front with status='transcoding' so it shows
-  // up in library immediately. Copy folder + size=0 (updated after finish).
   const insert = db.prepare(`INSERT INTO videos
     (title, filename, size_bytes, duration_seconds, status, folder_id,
      src_width, src_height, src_fps)
@@ -126,8 +172,59 @@ function start(sourceVideoId, targetSeconds, title) {
   );
   const outputVideoId = Number(result.lastInsertRowid);
 
-  // FFmpeg args — stream_loop repeats the input forever, -t caps output, -c
-  // copy avoids any decode/encode. Very fast regardless of target length.
+  const jobId = String(nextJobId++);
+  const logPath = path.join(logsDir, `loop-${jobId}.log`);
+  const logStream = fs.createWriteStream(logPath, { flags: 'a' });
+  logStream.write(`\n=== ${new Date().toISOString()} starting loop job=${jobId} mode=${smooth ? 'smooth' : 'fast'} src=${src.id} L=${srcDuration.toFixed(2)}s target=${target}s crossfade=${crossfadeSec}s\n`);
+
+  const jobState = {
+    mode: smooth ? 'smooth' : 'fast',
+    phase: 1,
+    progress: {
+      percent: 0,
+      time: 0,
+      duration: target,
+      speed: null,
+      phase: 1,
+      phaseLabel: smooth ? 'Creating seamless unit' : 'Looping',
+    },
+    sourceVideoId: src.id,
+    outputVideoId,
+    target,
+    startedAt: Date.now(),
+    cancelRequested: false,
+    process: null,
+  };
+  jobs.set(jobId, jobState);
+
+  const ctx = {
+    jobId,
+    srcPath,
+    srcDuration,
+    target,
+    crossfadeSec,
+    outPath,
+    outputVideoId,
+    logStream,
+    jobState,
+  };
+
+  if (smooth) {
+    runSmoothPhase1(ctx);
+  } else {
+    runFastPhase(ctx);
+  }
+
+  return { jobId, outputVideoId, outputFilename: outFilename, mode: jobState.mode };
+}
+
+// ---------------------------------------------------------------------------
+// Fast mode: one FFmpeg pass, -c copy.
+// ---------------------------------------------------------------------------
+
+function runFastPhase(ctx) {
+  const { srcPath, target, outPath, outputVideoId, logStream, jobState, jobId } = ctx;
+
   const args = [
     '-hide_banner', '-y',
     '-nostats',
@@ -141,39 +238,175 @@ function start(sourceVideoId, targetSeconds, title) {
     outPath,
   ];
 
-  const jobId = String(nextJobId++);
-  const logPath = path.join(logsDir, `loop-${jobId}.log`);
-  const logStream = fs.createWriteStream(logPath, { flags: 'a' });
-  logStream.write(`\n=== ${new Date().toISOString()} starting loop job=${jobId} src=${src.id} target=${target}s\n`);
-  logStream.write(`=== cmd: ffmpeg ${args.join(' ')}\n`);
+  logStream.write(`=== phase 1 (fast loop) cmd: ffmpeg ${args.join(' ')}\n`);
+  const proc = spawnWithProgress(args, logStream, jobState, {
+    denominator: target,
+    phase: 1,
+    phaseLabel: 'Looping',
+    weight: { start: 0, end: 100 },
+  });
+  jobState.process = proc;
 
+  proc.on('exit', (code, signal) => {
+    logStream.write(`\n=== phase 1 exit code=${code} signal=${signal}\n`);
+    finishJob(ctx, code, signal);
+  });
+  proc.on('error', (err) => handleSpawnError(ctx, err));
+}
+
+// ---------------------------------------------------------------------------
+// Smooth mode: phase 1 create seamless unit, phase 2 loop it with -c copy.
+// ---------------------------------------------------------------------------
+
+function runSmoothPhase1(ctx) {
+  const { srcPath, srcDuration, crossfadeSec, logStream, jobState, jobId } = ctx;
+
+  // Temp file for the seamless unit, placed in uploads dir so phase 2 can read
+  // it. We delete it after phase 2 finishes.
+  const seamlessFilename = `.loop_seamless_${jobId}.mp4`;
+  const seamlessPath = path.join(uploadDir, seamlessFilename);
+  ctx.seamlessPath = seamlessPath;
+
+  const L = srcDuration;
+  const D = crossfadeSec;
+  // Seamless unit length — see module docstring for derivation.
+  const seamlessLen = L - D;
+  ctx.seamlessLen = seamlessLen;
+
+  // Build filter_complex to produce a clip of length L-D where:
+  //   [0, D]     = crossfade(tail=A[L-D:L] → head=A[0:D])
+  //   [D, L-D]   = middle = A[D:L-D]
+  // When this plays on loop, the "joint" between iterations falls inside the
+  // crossfade at the start, so there's no hard jump.
+  //
+  // We probe for audio first so we can conditionally include acrossfade.
+  const info = transcoder.probeVideoInfo(srcPath);
+  const hasAudio = !!info.audioCodec;
+
+  const vfilter = [
+    `[0:v]trim=0:${D},setpts=PTS-STARTPTS[vhead]`,
+    `[0:v]trim=${L - D}:${L},setpts=PTS-STARTPTS[vtail]`,
+    `[0:v]trim=${D}:${L - D},setpts=PTS-STARTPTS[vmid]`,
+    `[vtail][vhead]xfade=transition=fade:duration=${D}:offset=0[vblend]`,
+    `[vblend][vmid]concat=n=2:v=1:a=0[vout]`,
+  ].join(';');
+
+  let filter = vfilter;
+  const mapArgs = ['-map', '[vout]'];
+  if (hasAudio) {
+    const afilter = [
+      `[0:a]atrim=0:${D},asetpts=PTS-STARTPTS[ahead]`,
+      `[0:a]atrim=${L - D}:${L},asetpts=PTS-STARTPTS[atail]`,
+      `[0:a]atrim=${D}:${L - D},asetpts=PTS-STARTPTS[amid]`,
+      `[atail][ahead]acrossfade=d=${D}[ablend]`,
+      `[ablend][amid]concat=n=2:v=0:a=1[aout]`,
+    ].join(';');
+    filter = vfilter + ';' + afilter;
+    mapArgs.push('-map', '[aout]');
+  }
+
+  const args = [
+    '-hide_banner', '-y',
+    '-nostats',
+    '-progress', 'pipe:1',
+    '-i', ctx.srcPath,
+    '-filter_complex', filter,
+    ...mapArgs,
+    '-c:v', 'libx264',
+    '-preset', 'veryfast',
+    '-profile:v', 'high',
+    '-pix_fmt', 'yuv420p',
+    '-crf', '20',
+  ];
+  if (hasAudio) {
+    args.push('-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-ac', '2');
+  }
+  args.push('-movflags', '+faststart', seamlessPath);
+
+  logStream.write(`=== phase 1 (seamless unit, L=${L} D=${D} seamlessLen=${seamlessLen} hasAudio=${hasAudio}) cmd: ffmpeg ${args.join(' ')}\n`);
+
+  // Phase 1 progress goes 0-60% of the bar (this is the slow part — actual
+  // encoding). Phase 2 covers 60-100%.
+  jobState.phase = 1;
+  jobState.progress.phase = 1;
+  jobState.progress.phaseLabel = 'Creating seamless unit';
+
+  const proc = spawnWithProgress(args, logStream, jobState, {
+    denominator: seamlessLen,
+    phase: 1,
+    phaseLabel: 'Creating seamless unit',
+    weight: { start: 0, end: 60 },
+  });
+  jobState.process = proc;
+
+  proc.on('exit', (code, signal) => {
+    logStream.write(`\n=== phase 1 exit code=${code} signal=${signal}\n`);
+    if (jobState.cancelRequested || code !== 0 || signal) {
+      return finishJob(ctx, code, signal);
+    }
+    if (!fs.existsSync(seamlessPath)) {
+      logStream.write(`=== phase 1 finished but seamless file missing at ${seamlessPath}\n`);
+      return finishJob(ctx, 1, null);
+    }
+    runSmoothPhase2(ctx);
+  });
+  proc.on('error', (err) => handleSpawnError(ctx, err));
+}
+
+function runSmoothPhase2(ctx) {
+  const { target, outPath, logStream, jobState, seamlessPath } = ctx;
+
+  const args = [
+    '-hide_banner', '-y',
+    '-nostats',
+    '-progress', 'pipe:1',
+    '-stream_loop', '-1',
+    '-i', seamlessPath,
+    '-c', 'copy',
+    '-map', '0:v:0', '-map', '0:a:0?',
+    '-t', String(target),
+    '-movflags', '+faststart',
+    outPath,
+  ];
+
+  logStream.write(`=== phase 2 (loop seamless unit) cmd: ffmpeg ${args.join(' ')}\n`);
+
+  jobState.phase = 2;
+  jobState.progress.phase = 2;
+  jobState.progress.phaseLabel = 'Looping to target duration';
+
+  const proc = spawnWithProgress(args, logStream, jobState, {
+    denominator: target,
+    phase: 2,
+    phaseLabel: 'Looping to target duration',
+    weight: { start: 60, end: 100 },
+  });
+  jobState.process = proc;
+
+  proc.on('exit', (code, signal) => {
+    logStream.write(`\n=== phase 2 exit code=${code} signal=${signal}\n`);
+    finishJob(ctx, code, signal);
+  });
+  proc.on('error', (err) => handleSpawnError(ctx, err));
+}
+
+// ---------------------------------------------------------------------------
+// Shared helpers
+// ---------------------------------------------------------------------------
+
+// Spawn ffmpeg with -progress pipe:1 parsing. Progress updates jobState.progress
+// with `percent` normalized to the weight range (so phase 1 can be 0-60 of the
+// total bar, phase 2 can be 60-100).
+function spawnWithProgress(args, logStream, jobState, { denominator, phase, phaseLabel, weight }) {
   const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
 
-  const progress = {
-    percent: 0,
-    time: 0,
-    duration: target,
-    speed: null,
-  };
-  const startedAt = Date.now();
-
-  jobs.set(jobId, {
-    process: proc,
-    progress,
-    sourceVideoId: src.id,
-    outputVideoId,
-    target,
-    startedAt,
-  });
-
-  // Parse -progress key=value pairs from stdout.
-  let stdoutBuf = '';
+  let buf = '';
   proc.stdout.on('data', (chunk) => {
-    stdoutBuf += chunk.toString('utf8');
+    buf += chunk.toString('utf8');
     let idx;
-    while ((idx = stdoutBuf.indexOf('\n')) !== -1) {
-      const line = stdoutBuf.slice(0, idx).trim();
-      stdoutBuf = stdoutBuf.slice(idx + 1);
+    while ((idx = buf.indexOf('\n')) !== -1) {
+      const line = buf.slice(0, idx).trim();
+      buf = buf.slice(idx + 1);
       const eq = line.indexOf('=');
       if (eq === -1) continue;
       const k = line.slice(0, eq);
@@ -181,86 +414,100 @@ function start(sourceVideoId, targetSeconds, title) {
       if (k === 'out_time_ms') {
         const ms = Number(v);
         if (Number.isFinite(ms) && ms > 0) {
-          progress.time = ms / 1_000_000;
-          progress.percent = Math.min(100, Math.round((progress.time / target) * 100));
+          const t = ms / 1_000_000;
+          jobState.progress.time = t;
+          if (denominator > 0) {
+            const raw = Math.min(1, t / denominator);
+            const scaled = weight.start + raw * (weight.end - weight.start);
+            jobState.progress.percent = Math.round(scaled);
+          }
         }
       } else if (k === 'out_time') {
         const t = parseTime(v);
         if (t != null) {
-          progress.time = t;
-          progress.percent = Math.min(100, Math.round((t / target) * 100));
+          jobState.progress.time = t;
+          if (denominator > 0) {
+            const raw = Math.min(1, t / denominator);
+            const scaled = weight.start + raw * (weight.end - weight.start);
+            jobState.progress.percent = Math.round(scaled);
+          }
         }
       } else if (k === 'speed') {
         const s = parseFloat(String(v).replace('x', ''));
-        if (Number.isFinite(s)) progress.speed = s;
+        if (Number.isFinite(s)) jobState.progress.speed = s;
       }
     }
+    jobState.progress.phase = phase;
+    jobState.progress.phaseLabel = phaseLabel;
   });
 
   proc.stderr.on('data', (c) => logStream.write(c));
+  return proc;
+}
 
-  proc.on('exit', (code, signal) => {
-    logStream.write(`\n=== ${new Date().toISOString()} loop exit code=${code} signal=${signal}\n`);
-    logStream.end();
-    jobs.delete(jobId);
+function finishJob(ctx, code, signal) {
+  const { jobId, outPath, outputVideoId, logStream, jobState } = ctx;
+  logStream.write(`\n=== ${new Date().toISOString()} job ${jobId} finished code=${code} signal=${signal}\n`);
+  logStream.end();
 
-    if (code === 0 && fs.existsSync(outPath)) {
+  // Cleanup intermediate seamless file if present.
+  if (ctx.seamlessPath && fs.existsSync(ctx.seamlessPath)) {
+    try { fs.unlinkSync(ctx.seamlessPath); } catch (_) {}
+  }
+
+  jobs.delete(jobId);
+
+  if (code === 0 && fs.existsSync(outPath)) {
+    try {
+      const size = fs.statSync(outPath).size;
+      const actualDuration = transcoder.probeDuration(outPath) || ctx.target;
+      db.prepare(`UPDATE videos
+        SET status='ready', size_bytes=?, duration_seconds=?, last_error=NULL
+        WHERE id=?`).run(size, actualDuration, outputVideoId);
       try {
-        const size = fs.statSync(outPath).size;
-        const actualDuration = transcoder.probeDuration(outPath) || target;
-        db.prepare(`UPDATE videos
-          SET status='ready', size_bytes=?, duration_seconds=?, last_error=NULL
-          WHERE id=?`).run(size, actualDuration, outputVideoId);
-        // Generate thumbnail for the new looped video.
-        try {
-          const thumb = transcoder.generateThumbnail(outPath, outputVideoId);
-          if (thumb) {
-            db.prepare('UPDATE videos SET thumbnail=? WHERE id=?').run(thumb, outputVideoId);
-          }
-        } catch (_) {}
-        // If source already had an h264+aac codec (stream-ready), the copy is
-        // also stream-ready — status 'ready' is accurate. Otherwise, user will
-        // still need to run Prepare on it; the file is copied as-is.
-      } catch (e) {
-        db.prepare(`UPDATE videos SET status='error', last_error=? WHERE id=?`)
-          .run('post-process failed: ' + e.message, outputVideoId);
-      }
-    } else {
-      if (fs.existsSync(outPath)) try { fs.unlinkSync(outPath); } catch (_) {}
-      const msg = signal
+        const thumb = transcoder.generateThumbnail(outPath, outputVideoId);
+        if (thumb) {
+          db.prepare('UPDATE videos SET thumbnail=? WHERE id=?').run(thumb, outputVideoId);
+        }
+      } catch (_) {}
+    } catch (e) {
+      db.prepare(`UPDATE videos SET status='error', last_error=? WHERE id=?`)
+        .run('post-process failed: ' + e.message, outputVideoId);
+    }
+  } else {
+    if (fs.existsSync(outPath)) try { fs.unlinkSync(outPath); } catch (_) {}
+    const msg = jobState.cancelRequested
+      ? 'loop cancelled by user'
+      : signal
         ? `loop cancelled (signal=${signal})`
         : `ffmpeg exited with code ${code} (see logs/loop-${jobId}.log)`;
-      db.prepare(`UPDATE videos SET status='error', last_error=? WHERE id=?`)
-        .run(msg, outputVideoId);
-    }
-  });
-
-  proc.on('error', (err) => {
-    logStream.write(`\n=== spawn error: ${err.message}\n`);
     db.prepare(`UPDATE videos SET status='error', last_error=? WHERE id=?`)
-      .run(err.message, outputVideoId);
-    jobs.delete(jobId);
-  });
+      .run(msg, outputVideoId);
+  }
+}
 
-  return { jobId, outputVideoId, outputFilename: outFilename };
+function handleSpawnError(ctx, err) {
+  const { jobId, logStream, outputVideoId } = ctx;
+  logStream.write(`\n=== spawn error: ${err.message}\n`);
+  logStream.end();
+  if (ctx.seamlessPath && fs.existsSync(ctx.seamlessPath)) {
+    try { fs.unlinkSync(ctx.seamlessPath); } catch (_) {}
+  }
+  db.prepare(`UPDATE videos SET status='error', last_error=? WHERE id=?`)
+    .run(err.message, outputVideoId);
+  jobs.delete(jobId);
 }
 
 function cancel(jobId) {
   const j = jobs.get(String(jobId));
   if (!j) return false;
-  try { j.process.kill('SIGTERM'); } catch (_) {}
+  j.cancelRequested = true;
+  try { if (j.process) j.process.kill('SIGTERM'); } catch (_) {}
   return true;
 }
 
-// On boot, any video row still marked 'transcoding' that came from a loop job
-// (we can't perfectly distinguish from prepare, but transcoder.reconcileOnBoot
-// already handles its own rows — this is a second sweep to catch anything left
-// behind after a crash during loop). Safe because both pipelines mark rows the
-// same way on failure.
 function reconcileOnBoot() {
-  // No-op: transcoder.reconcileOnBoot() already flips stale 'transcoding' →
-  // 'error'. We don't double up. This function exists so app.js can call it
-  // symmetrically with the other managers.
+  // transcoder.reconcileOnBoot() flips stale 'transcoding' → 'error' already.
 }
 
 function tailLog(jobId, lines = 100) {
