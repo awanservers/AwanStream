@@ -2,82 +2,129 @@
   title: playlist.name,
   activeNav: 'playlists',
   pageTitle: playlist.name,
-  pageSubtitle: 'Atur urutan video dalam playlist.',
+  pageSubtitle: items.length + ' videos' + (playlist.loop_playlist ? ' · Loop' : '') + (playlist.shuffle ? ' · Shuffle' : ''),
   topbarActions: `
     <a href="/playlists" class="btn">← Back</a>
   `,
 }) %>
 <%- include('partials/flash', { error, notice }) %>
 
-<div class="card">
-  <h2 style="margin-top:0">Add video</h2>
-  <% if (videos.length === 0) { %>
-    <p class="muted">Belum ada video ready. <a href="/videos">Upload & Prepare</a> dulu.</p>
-  <% } else { %>
-    <form method="POST" action="/playlists/<%= playlist.id %>/add-video" style="display:flex;gap:0.75rem;align-items:flex-end;flex-wrap:wrap">
-      <label style="flex:1;min-width:200px">Video
-        <select name="video_id" required>
-          <% videos.forEach(v => { %>
-            <option value="<%= v.id %>"><%= v.title %></option>
-          <% }) %>
-        </select>
-      </label>
-      <button class="btn btn-primary" type="submit">+ Add</button>
+<!-- Add video (inline, compact) -->
+<% if (videos.length > 0) { %>
+  <div class="playlist-add-bar">
+    <form method="POST" action="/playlists/<%= playlist.id %>/add-video" class="playlist-add-form">
+      <select name="video_id" required>
+        <option value="" disabled selected>Select video to add…</option>
+        <% videos.forEach(v => { %>
+          <option value="<%= v.id %>"><%= v.title %></option>
+        <% }) %>
+      </select>
+      <button class="btn btn-primary btn-sm" type="submit">+ Add</button>
     </form>
-  <% } %>
-</div>
+    <div class="playlist-add-bar-right">
+      <button type="button" class="btn-icon"
+              data-open-modal="edit-playlist-settings"
+              title="Playlist settings">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </button>
+    </div>
+  </div>
+<% } else { %>
+  <div class="card" style="margin-bottom:1rem">
+    <p class="muted">Belum ada video ready. <a href="/videos">Upload & Prepare</a> dulu.</p>
+  </div>
+<% } %>
 
-<h2 class="section-heading">Video order (<%= items.length %> items)</h2>
+<!-- Playlist items -->
 <% if (items.length === 0) { %>
   <div class="card empty">
     <p class="muted">Playlist kosong. Tambah video di atas.</p>
   </div>
 <% } else { %>
-  <div class="table-wrap card card-flush">
-    <table class="table">
-      <thead><tr>
-        <th style="width:50px">#</th>
-        <th class="col-w-title">Title</th>
-        <th class="col-w-date">Duration</th>
-        <th class="col-w-actions">Actions</th>
-      </tr></thead>
-      <tbody>
-        <% items.forEach((item, idx) => { %>
-          <tr>
-            <td class="muted"><%= item.position %></td>
-            <td class="truncate" title="<%= item.title %>"><%= item.title %></td>
-            <td class="col-date small muted">
-              <% if (item.duration_seconds) { %>
-                <% const m = Math.floor(item.duration_seconds/60); const s = Math.floor(item.duration_seconds%60); %>
-                <%= m %>:<%= String(s).padStart(2,'0') %>
-              <% } else { %>-<% } %>
-            </td>
-            <td class="actions">
-              <% if (idx > 0) { %>
-                <form method="POST" action="/playlists/<%= playlist.id %>/move-up/<%= item.item_id %>" class="inline">
-                  <button class="btn" type="submit" title="Move up">↑</button>
-                </form>
-              <% } %>
-              <% if (idx < items.length - 1) { %>
-                <form method="POST" action="/playlists/<%= playlist.id %>/move-down/<%= item.item_id %>" class="inline">
-                  <button class="btn" type="submit" title="Move down">↓</button>
-                </form>
-              <% } %>
-              <form method="POST" action="/playlists/<%= playlist.id %>/remove-item/<%= item.item_id %>" class="inline">
-                <button class="btn btn-danger" type="submit" title="Remove">×</button>
-              </form>
-            </td>
-          </tr>
-        <% }) %>
-      </tbody>
-    </table>
+  <div class="playlist-items">
+    <% items.forEach((item, idx) => { %>
+      <div class="playlist-item">
+        <span class="playlist-item-pos"><%= item.position %></span>
+        <div class="playlist-item-thumb">
+          <% if (item.thumbnail) { %>
+            <img src="/uploads/thumbs/<%= item.thumbnail %>" alt="" loading="lazy">
+          <% } else { %>
+            <div class="playlist-item-no-thumb">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="14" height="14" rx="2"/><path d="M22 7l-6 5 6 5V7z"/></svg>
+            </div>
+          <% } %>
+        </div>
+        <div class="playlist-item-info">
+          <div class="playlist-item-title"><%= item.title %></div>
+          <div class="playlist-item-meta small muted">
+            <% if (item.duration_seconds) { %>
+              <% const m = Math.floor(item.duration_seconds/60); const s = Math.floor(item.duration_seconds%60); %>
+              <%= m %>:<%= String(s).padStart(2,'0') %>
+            <% } %>
+            <% if (item.status !== 'ready') { %>
+              · <span class="badge badge-idle" style="font-size:0.7rem"><%= item.status %></span>
+            <% } %>
+          </div>
+        </div>
+        <div class="playlist-item-actions">
+          <% if (idx > 0) { %>
+            <form method="POST" action="/playlists/<%= playlist.id %>/move-up/<%= item.item_id %>" class="inline">
+              <button class="btn-icon" type="submit" title="Move up">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>
+              </button>
+            </form>
+          <% } else { %><span class="btn-icon" style="opacity:0;pointer-events:none"><svg width="14" height="14"></svg></span><% } %>
+          <% if (idx < items.length - 1) { %>
+            <form method="POST" action="/playlists/<%= playlist.id %>/move-down/<%= item.item_id %>" class="inline">
+              <button class="btn-icon" type="submit" title="Move down">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+              </button>
+            </form>
+          <% } else { %><span class="btn-icon" style="opacity:0;pointer-events:none"><svg width="14" height="14"></svg></span><% } %>
+          <form method="POST" action="/playlists/<%= playlist.id %>/remove-item/<%= item.item_id %>" class="inline">
+            <button class="btn-icon btn-icon-danger" type="submit" title="Remove">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </form>
+        </div>
+      </div>
+    <% }) %>
   </div>
-  <p class="muted small">
-    Total duration: <%
+  <p class="muted small" style="margin-top:0.75rem">
+    <%
       const totalSec = items.reduce((s, i) => s + (i.duration_seconds || 0), 0);
-      const h = Math.floor(totalSec/3600); const m = Math.floor((totalSec%3600)/60);
-    %><%= h > 0 ? h + 'h ' : '' %><%= m %>m
-    · Loop: <%= playlist.loop_playlist ? 'Yes (infinite)' : 'No (stop after last)' %>
+      const th = Math.floor(totalSec/3600); const tm = Math.floor((totalSec%3600)/60);
+    %>
+    Total: <%= th > 0 ? th + 'h ' : '' %><%= tm %>m
+    · <%= playlist.loop_playlist ? 'Loop ∞' : 'Play once' %>
+    <%= playlist.shuffle ? ' · Shuffle' : '' %>
   </p>
 <% } %>
+
+<!-- Settings modal -->
+<dialog id="edit-playlist-settings" class="modal modal-sm">
+  <div class="modal-card">
+    <header class="modal-header">
+      <h2>Playlist settings</h2>
+      <button type="button" class="modal-close" data-close-modal aria-label="Close">×</button>
+    </header>
+    <form method="POST" action="/playlists/<%= playlist.id %>/settings">
+      <div class="modal-body">
+        <label>Name <input name="name" required value="<%= playlist.name %>"></label>
+        <label class="inline-check">
+          <input type="checkbox" name="loop_playlist" value="1" <%= playlist.loop_playlist ? 'checked' : '' %>>
+          Loop (setelah video terakhir, mulai dari awal)
+        </label>
+        <label class="inline-check">
+          <input type="checkbox" name="shuffle" value="1" <%= playlist.shuffle ? 'checked' : '' %>>
+          Shuffle (putar video secara acak)
+        </label>
+      </div>
+      <footer class="modal-footer">
+        <button type="button" class="btn" data-close-modal>Batal</button>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </footer>
+    </form>
+  </div>
+</dialog>
 <%- include('partials/footer') %>

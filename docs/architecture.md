@@ -130,7 +130,7 @@ JSON endpoints untuk polling:
 
 ## Data model
 
-6 tabel application + 1 session table. Main data di `db/awanstream.db`, session terpisah di `db/sessions.db` (dikelola `connect-sqlite3`).
+8 tabel application + 1 session table. Main data di `db/awanstream.db`, session terpisah di `db/sessions.db` (dikelola `connect-sqlite3`).
 
 ```sql
 users (
@@ -144,7 +144,13 @@ videos (
   src_height INTEGER,                -- source video height (pixels)
   src_fps REAL,                      -- source framerate
   status TEXT DEFAULT 'uploaded',    -- uploaded | downloading | transcoding | ready | error
+  thumbnail TEXT,                    -- filename in public/uploads/thumbs/
+  folder_id INTEGER FK folders,      -- nullable
   last_error, created_at
+)
+
+folders (
+  id, name, created_at               -- storage organizer, 1 video → 1 folder
 )
 
 streams (
@@ -171,12 +177,22 @@ schedules (
 playlists (
   id, name,
   loop_playlist BOOL DEFAULT 1,       -- wrap around to first video after last
+  shuffle BOOL DEFAULT 0,             -- pick random next video (not sequential)
   created_at
 )
 
 playlist_items (
   id, playlist_id FK, video_id FK,
   position INTEGER DEFAULT 0          -- ordering (1-based, ascending)
+)
+
+stream_history (
+  id, stream_id,                     -- nullable — survives stream deletion
+  stream_name, video_title, platform,
+  started_at, stopped_at,
+  duration_seconds INTEGER,          -- only rows with >= 10s are saved
+  status TEXT DEFAULT 'completed',   -- completed | error
+  last_error, created_at
 )
 ```
 

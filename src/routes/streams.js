@@ -8,10 +8,10 @@ const router = express.Router();
 const uploadDir = path.join(__dirname, '..', '..', 'public', 'uploads');
 
 const PRESETS = {
-  youtube: 'rtmp://a.rtmp.youtube.com/live2',
-  facebook: 'rtmps://live-api-s.facebook.com:443/rtmp',
-  twitch: 'rtmp://live.twitch.tv/app',
-  custom: '',
+  youtube:  { label: 'YouTube',  url: 'rtmp://x.rtmp.youtube.com/live2' },
+  facebook: { label: 'Facebook', url: 'rtmps://live-api-s.facebook.com:443/rtmp' },
+  twitch:   { label: 'Twitch',   url: 'rtmp://live.twitch.tv/app' },
+  custom:   { label: 'Custom',   url: '' },
 };
 
 router.get('/', (req, res) => {
@@ -133,6 +133,47 @@ router.post('/:id/delete', (req, res) => {
   if (streamManager.isRunning(id)) streamManager.stopStream(id);
   db.prepare('DELETE FROM streams WHERE id=?').run(id);
   res.redirect(back + '?notice=Stream+deleted');
+});
+
+router.post('/:id/edit', (req, res) => {
+  const id = Number(req.params.id);
+  const stream = db.prepare('SELECT * FROM streams WHERE id=?').get(id);
+  if (!stream) return res.redirect('/streams/single?error=Stream+not+found');
+  const back = stream.playlist_id ? '/streams/playlist' : '/streams/single';
+  if (streamManager.isRunning(id)) {
+    return res.redirect(back + '?error=Stop+stream+first+before+editing');
+  }
+  const { name, video_id, playlist_id, platform, rtmp_url, stream_key, loop_video,
+          re_encode, video_bitrate, keyframe_interval, preset } = req.body;
+  if (!name || !rtmp_url || !stream_key) {
+    return res.redirect(back + '?error=All+fields+are+required');
+  }
+  const vid = Number(video_id) || null;
+  const plid = Number(playlist_id) || null;
+  let effectiveVideoId = vid;
+  if (plid && !vid) {
+    const first = db.prepare(`SELECT video_id FROM playlist_items
+      WHERE playlist_id=? ORDER BY position ASC LIMIT 1`).get(plid);
+    if (first) effectiveVideoId = first.video_id;
+  }
+  db.prepare(`UPDATE streams SET
+    name=?, video_id=?, playlist_id=?, platform=?, rtmp_url=?, stream_key=?,
+    loop_video=?, re_encode=?, video_bitrate=?, keyframe_interval=?, preset=?
+    WHERE id=?`).run(
+    name.trim(),
+    effectiveVideoId,
+    plid,
+    (platform || 'custom').trim(),
+    rtmp_url.trim(),
+    stream_key.trim(),
+    loop_video ? 1 : 0,
+    re_encode === '1' ? 1 : 0,
+    (video_bitrate || '4500k').trim(),
+    Math.max(1, Math.min(10, Number(keyframe_interval) || 2)),
+    (preset || 'veryfast').trim(),
+    id,
+  );
+  res.redirect(back + '?notice=Stream+updated');
 });
 
 router.get('/:id/log', (req, res) => {

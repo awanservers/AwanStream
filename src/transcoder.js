@@ -38,7 +38,7 @@ function probeDuration(filePath) {
     '-show_entries', 'format=duration',
     '-of', 'default=noprint_wrappers=1:nokey=1',
     filePath,
-  ], { encoding: 'utf8' });
+  ], { encoding: 'utf8', timeout: 30000 });
   if (r.status !== 0) return null;
   const d = parseFloat(String(r.stdout).trim());
   return Number.isFinite(d) && d > 0 ? d : null;
@@ -55,7 +55,7 @@ function probeVideoInfo(filePath) {
     '-show_entries', 'format=duration',
     '-of', 'json',
     filePath,
-  ], { encoding: 'utf8' });
+  ], { encoding: 'utf8', timeout: 30000 });
 
   const out = { width: null, height: null, fps: null, duration: null, videoCodec: null, audioCodec: null };
   if (r.status !== 0) return out;
@@ -88,7 +88,7 @@ function probeVideoInfo(filePath) {
     '-show_entries', 'stream=codec_name',
     '-of', 'default=noprint_wrappers=1:nokey=1',
     filePath,
-  ], { encoding: 'utf8' });
+  ], { encoding: 'utf8', timeout: 15000 });
   if (ra.status === 0 && ra.stdout.trim()) {
     out.audioCodec = ra.stdout.trim();
   }
@@ -248,6 +248,11 @@ function start(videoId, presetName, x264Preset = 'medium') {
         db.prepare(`UPDATE videos
           SET status='ready', size_bytes=?, duration_seconds=?, last_error=NULL
           WHERE id=?`).run(srcSize, newDur, id);
+        // Regenerate thumbnail from the prepared file.
+        const thumb = generateThumbnail(srcPath, id);
+        if (thumb) {
+          db.prepare('UPDATE videos SET thumbnail=? WHERE id=?').run(thumb, id);
+        }
       } catch (e) {
         db.prepare("UPDATE videos SET status='error', last_error=? WHERE id=?")
           .run('replace failed: ' + e.message, id);
@@ -288,7 +293,62 @@ function tailLog(videoId, lines = 60) {
   return data.slice(-lines).join('\n');
 }
 
+/**
+ * Generate a thumbnail image from a video file.
+ * Extracts a frame at ~10% of the video duration (or 2s for short videos).
+ * Saves as a 320px-wide JPEG in public/uploads/thumbs/.
+ * Returns the filename (relative to thumbs/) or null on failure.
+ */
+function generateThumbnail(videoPath, videoId) {
+  const { spawnSync } = require('child_process');
+  const thumbsDir = path.join(__dirname, '..', 'public', 'uploads', 'thumbs');
+  if (!fs.existsSync(thumbsDir)) fs.mkdirSync(thumbsDir, { recursive: true });
+
+  // Determine seek position: 10% of duration, min 1s, max 30s.
+  const duration = probeDuration(videoPath);
+  let seekSec = 2;
+  if (duration) {
+    seekSec = Math.max(1, Math.min(30, Math.round(duration * 0.1)));
+  }
+
+  const thumbFilename = `thumb_${videoId}.jpg`;
+  const thumbPath = path.join(thumbsDir, thumbFilename);
+
+  // Generate 1280×720 thumbnail (YouTube-style). Keep aspect ratio, pad with black if needed.
+  const r = spawnSync('ffmpeg', [
+    '-v', 'error',
+    '-ss', String(seekSec),
+    '-i', videoPath,
+    '-frames:v', '1',
+    '-vf', 'scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:black',
+    '-q:v', '3',
+    '-y',
+    thumbPath,
+  ], { encoding: 'utf8', timeout: 20000 });
+
+  if (r.status === 0 && fs.existsSync(thumbPath)) {
+    return thumbFilename;
+  }
+
+  // Fallback: try at 0s if seeking failed (very short video).
+  const r2 = spawnSync('ffmpeg', [
+    '-v', 'error',
+    '-i', videoPath,
+    '-frames:v', '1',
+    '-vf', 'scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:black',
+    '-q:v', '3',
+    '-y',
+    thumbPath,
+  ], { encoding: 'utf8', timeout: 20000 });
+
+  if (r2.status === 0 && fs.existsSync(thumbPath)) {
+    return thumbFilename;
+  }
+
+  return null;
+}
+
 module.exports = {
   presets, start, cancel, isRunning, reconcileOnBoot, tailLog,
-  getProgress, probeDuration, probeVideoInfo, validateCodec,
+  getProgress, probeDuration, probeVideoInfo, validateCodec, generateThumbnail,
 };

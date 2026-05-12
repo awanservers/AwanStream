@@ -5,6 +5,7 @@ const multer = require('multer');
 const { db } = require('../db');
 const transcoder = require('../transcoder');
 const downloader = require('../downloader');
+const chunkUpload = require('../chunkUpload');
 
 const router = express.Router();
 const uploadDir = path.join(__dirname, '..', '..', 'public', 'uploads');
@@ -30,9 +31,45 @@ const upload = multer({
 });
 
 router.get('/', (req, res) => {
-  const videos = db.prepare('SELECT * FROM videos ORDER BY created_at DESC').all();
+  const folderId = req.query.folder ? Number(req.query.folder) : null;
+  const page = Math.max(1, Number(req.query.page) || 1);
+  const perPage = 20;
+  const offset = (page - 1) * perPage;
+
+  const folders = db.prepare(`
+    SELECT f.*, (SELECT COUNT(*) FROM videos v WHERE v.folder_id = f.id) AS video_count
+    FROM folders f ORDER BY f.name ASC
+  `).all();
+  // Count videos without a folder.
+  const unfolderedCount = db.prepare('SELECT COUNT(*) AS c FROM videos WHERE folder_id IS NULL').get().c;
+
+  let videos;
+  let totalCount;
+  if (folderId) {
+    totalCount = db.prepare('SELECT COUNT(*) AS c FROM videos WHERE folder_id=?').get(folderId).c;
+    videos = db.prepare(
+      'SELECT * FROM videos WHERE folder_id=? ORDER BY created_at DESC LIMIT ? OFFSET ?'
+    ).all(folderId, perPage, offset);
+  } else if (req.query.folder === '0') {
+    // Explicitly show "unfiled" videos only.
+    totalCount = db.prepare('SELECT COUNT(*) AS c FROM videos WHERE folder_id IS NULL').get().c;
+    videos = db.prepare(
+      'SELECT * FROM videos WHERE folder_id IS NULL ORDER BY created_at DESC LIMIT ? OFFSET ?'
+    ).all(perPage, offset);
+  } else {
+    // Show all videos.
+    totalCount = db.prepare('SELECT COUNT(*) AS c FROM videos').get().c;
+    videos = db.prepare(
+      'SELECT * FROM videos ORDER BY created_at DESC LIMIT ? OFFSET ?'
+    ).all(perPage, offset);
+  }
+
+  const currentFolder = folderId ? db.prepare('SELECT * FROM folders WHERE id=?').get(folderId) : null;
+  const totalPages = Math.max(1, Math.ceil(totalCount / perPage));
+
   res.render('videos', {
-    videos,
+    videos, folders, currentFolder, unfolderedCount,
+    page, perPage, totalPages, totalCount,
     presets: transcoder.presets(),
     error: req.query.error || null,
     notice: req.query.notice || null,
@@ -45,14 +82,30 @@ router.post('/upload', (req, res) => {
     if (!req.file) return res.redirect('/videos?error=No+file+uploaded');
     const rawTitle = (req.body.title || req.file.originalname).trim();
     const title = uniqueTitle(rawTitle);
+    const folderId = req.body.folder_id ? Number(req.body.folder_id) : null;
+    // Insert row immediately — don't block on ffprobe.
+    const result = db.prepare(`INSERT INTO videos
+      (title, filename, size_bytes, status, folder_id)
+      VALUES (?, ?, ?, 'uploaded', ?)`)
+      .run(title, req.file.filename, req.file.size, folderId);
+    const videoId = result.lastInsertRowid;
     const uploadedPath = path.join(uploadDir, req.file.filename);
-    const info = transcoder.probeVideoInfo(uploadedPath);
-    db.prepare(`INSERT INTO videos
-      (title, filename, size_bytes, status, duration_seconds, src_width, src_height, src_fps)
-      VALUES (?, ?, ?, 'uploaded', ?, ?, ?, ?)`)
-      .run(title, req.file.filename, req.file.size,
-        info.duration, info.width, info.height, info.fps);
-    res.redirect('/videos?notice=Upload+complete.+Use+Prepare+to+make+it+stream-ready.');
+    // Probe + thumbnail in background after response is sent.
+    setImmediate(() => {
+      try {
+        const info = transcoder.probeVideoInfo(uploadedPath);
+        if (info.duration || info.width || info.height || info.fps) {
+          db.prepare(`UPDATE videos SET duration_seconds=?, src_width=?, src_height=?, src_fps=? WHERE id=?`)
+            .run(info.duration, info.width, info.height, info.fps, videoId);
+        }
+      } catch (_) {}
+      try {
+        const thumb = transcoder.generateThumbnail(uploadedPath, videoId);
+        if (thumb) db.prepare('UPDATE videos SET thumbnail=? WHERE id=?').run(thumb, videoId);
+      } catch (_) {}
+    });
+    const back = folderId ? '/videos?folder=' + folderId + '&notice=Upload+complete.+Use+Prepare+to+make+it+stream-ready.' : '/videos?notice=Upload+complete.+Use+Prepare+to+make+it+stream-ready.';
+    res.redirect(back);
   });
 });
 
@@ -68,6 +121,89 @@ function uniqueTitle(base) {
   }
   return `${stripped} (${Date.now()})`;
 }
+
+// --- Chunked upload API (JSON) ---
+
+// Initialize chunked upload session.
+router.post('/chunked/init', express.json(), (req, res) => {
+  const { filename, fileSize } = req.body;
+  if (!filename || !fileSize) {
+    return res.status(400).json({ error: 'filename and fileSize required' });
+  }
+  if (!/\.(mp4|mkv|mov|flv|ts|webm)$/i.test(filename)) {
+    return res.status(400).json({ error: 'Unsupported video format' });
+  }
+  const session = chunkUpload.initSession(filename, Number(fileSize));
+  res.json(session);
+});
+
+// Get session status (for resume).
+router.get('/chunked/:uploadId/status', (req, res) => {
+  const session = chunkUpload.getSession(req.params.uploadId);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
+  res.json(session);
+});
+
+// Upload a single chunk (raw binary body).
+router.put('/chunked/:uploadId/:chunkIndex', (req, res) => {
+  const uploadId = req.params.uploadId;
+  const chunkIndex = Number(req.params.chunkIndex);
+  const chunks = [];
+  req.on('data', (chunk) => chunks.push(chunk));
+  req.on('end', () => {
+    try {
+      const data = Buffer.concat(chunks);
+      const result = chunkUpload.saveChunk(uploadId, chunkIndex, data);
+      res.json(result);
+    } catch (e) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+  req.on('error', (e) => {
+    res.status(500).json({ error: e.message });
+  });
+});
+
+// Finalize: merge chunks, create video record.
+router.post('/chunked/:uploadId/finalize', express.json(), (req, res) => {
+  const uploadId = req.params.uploadId;
+  const title = (req.body.title || '').trim();
+  const folderId = req.body.folder_id ? Number(req.body.folder_id) : null;
+  try {
+    const { filename, filePath, fileSize } = chunkUpload.finalize(uploadId);
+    const rawTitle = title || filename;
+    const finalTitle = uniqueTitle(rawTitle);
+    // Insert row immediately — probe in background.
+    const result = db.prepare(`INSERT INTO videos
+      (title, filename, size_bytes, status, folder_id)
+      VALUES (?, ?, ?, 'uploaded', ?)`)
+      .run(finalTitle, filename, fileSize, folderId);
+    const videoId = result.lastInsertRowid;
+    // Probe + thumbnail in background.
+    setImmediate(() => {
+      try {
+        const info = transcoder.probeVideoInfo(filePath);
+        if (info.duration || info.width || info.height || info.fps) {
+          db.prepare(`UPDATE videos SET duration_seconds=?, src_width=?, src_height=?, src_fps=? WHERE id=?`)
+            .run(info.duration, info.width, info.height, info.fps, videoId);
+        }
+      } catch (_) {}
+      try {
+        const thumb = transcoder.generateThumbnail(filePath, videoId);
+        if (thumb) db.prepare('UPDATE videos SET thumbnail=? WHERE id=?').run(thumb, videoId);
+      } catch (_) {}
+    });
+    res.json({ ok: true, videoId, title: finalTitle });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// Cancel/abort chunked upload.
+router.delete('/chunked/:uploadId', (req, res) => {
+  chunkUpload.cleanup(req.params.uploadId);
+  res.json({ ok: true });
+});
 
 router.get('/:id/progress', (req, res) => {
   const id = Number(req.params.id);
@@ -177,6 +313,150 @@ router.post('/:id/delete', (req, res) => {
   const p = path.join(uploadDir, video.filename);
   if (fs.existsSync(p)) try { fs.unlinkSync(p); } catch (_) {}
   res.redirect('/videos');
+});
+
+// --- Folder management ---
+
+router.post('/folders/create', (req, res) => {
+  const { name } = req.body;
+  if (!name || !name.trim()) return res.redirect('/videos?error=Folder+name+is+required');
+  db.prepare('INSERT INTO folders (name) VALUES (?)').run(name.trim());
+  res.redirect('/videos?notice=Folder+created');
+});
+
+router.post('/folders/:id/rename', (req, res) => {
+  const { name } = req.body;
+  if (!name || !name.trim()) return res.redirect('/videos?error=Name+is+required');
+  db.prepare('UPDATE folders SET name=? WHERE id=?').run(name.trim(), Number(req.params.id));
+  res.redirect('/videos?folder=' + req.params.id + '&notice=Folder+renamed');
+});
+
+router.post('/folders/:id/delete', (req, res) => {
+  const folderId = Number(req.params.id);
+  // Move videos back to unfiled (don't delete them).
+  db.prepare('UPDATE videos SET folder_id=NULL WHERE folder_id=?').run(folderId);
+  db.prepare('DELETE FROM folders WHERE id=?').run(folderId);
+  res.redirect('/videos?notice=Folder+deleted');
+});
+
+// Bulk: prepare all 'uploaded' videos in a folder.
+router.post('/folders/:id/prepare-all', (req, res) => {
+  const folderId = Number(req.params.id);
+  const preset = (req.body.preset || '1080p30').trim();
+  const x264Preset = (req.body.x264_preset || 'medium').trim();
+  const videos = db.prepare(
+    "SELECT id FROM videos WHERE folder_id=? AND status='uploaded'"
+  ).all(folderId);
+  let started = 0;
+  let skipped = 0;
+  for (const v of videos) {
+    try {
+      transcoder.start(v.id, preset, x264Preset);
+      started++;
+    } catch (e) {
+      // Skip if already running or other error.
+      skipped++;
+    }
+  }
+  const msg = `Started ${started} transcode job${started !== 1 ? 's' : ''}` +
+    (skipped > 0 ? ` (${skipped} skipped)` : '');
+  res.redirect('/videos?folder=' + folderId + '&notice=' + encodeURIComponent(msg));
+});
+
+// Bulk: delete all videos in a folder.
+router.post('/folders/:id/delete-videos', (req, res) => {
+  const folderId = Number(req.params.id);
+  const videos = db.prepare('SELECT * FROM videos WHERE folder_id=?').all(folderId);
+  let deleted = 0;
+  let skipped = 0;
+  for (const video of videos) {
+    // Skip if currently transcoding or streaming.
+    if (transcoder.isRunning(video.id)) { skipped++; continue; }
+    const inUse = db.prepare(
+      "SELECT COUNT(*) AS c FROM streams WHERE video_id=? AND status='running'"
+    ).get(video.id).c;
+    if (inUse > 0) { skipped++; continue; }
+    db.prepare('DELETE FROM streams WHERE video_id=?').run(video.id);
+    db.prepare('DELETE FROM videos WHERE id=?').run(video.id);
+    const p = path.join(uploadDir, video.filename);
+    if (fs.existsSync(p)) try { fs.unlinkSync(p); } catch (_) {}
+    // Cleanup thumbnail too.
+    if (video.thumbnail) {
+      const thumbPath = path.join(uploadDir, 'thumbs', video.thumbnail);
+      if (fs.existsSync(thumbPath)) try { fs.unlinkSync(thumbPath); } catch (_) {}
+    }
+    deleted++;
+  }
+  const msg = `Deleted ${deleted} video${deleted !== 1 ? 's' : ''}` +
+    (skipped > 0 ? ` (${skipped} skipped — in use)` : '');
+  res.redirect('/videos?folder=' + folderId + '&notice=' + encodeURIComponent(msg));
+});
+
+// Convert folder to playlist — creates a new playlist with all 'ready' videos.
+router.post('/folders/:id/create-playlist', (req, res) => {
+  const folderId = Number(req.params.id);
+  const folder = db.prepare('SELECT * FROM folders WHERE id=?').get(folderId);
+  if (!folder) return res.redirect('/videos?error=Folder+not+found');
+  const videos = db.prepare(
+    "SELECT id FROM videos WHERE folder_id=? AND status='ready' ORDER BY created_at ASC"
+  ).all(folderId);
+  if (videos.length === 0) {
+    return res.redirect('/videos?folder=' + folderId +
+      '&error=No+ready+videos+in+this+folder.+Prepare+videos+first.');
+  }
+  // Create playlist with folder name.
+  const result = db.prepare(
+    'INSERT INTO playlists (name, loop_playlist, shuffle) VALUES (?, 1, 0)'
+  ).run(folder.name);
+  const playlistId = result.lastInsertRowid;
+  // Add all ready videos.
+  const insertItem = db.prepare(
+    'INSERT INTO playlist_items (playlist_id, video_id, position) VALUES (?, ?, ?)'
+  );
+  videos.forEach((v, idx) => insertItem.run(playlistId, v.id, idx + 1));
+  res.redirect('/playlists/' + playlistId +
+    '?notice=Playlist+created+with+' + videos.length + '+videos');
+});
+
+router.post('/:id/move-folder', (req, res) => {
+  const videoId = Number(req.params.id);
+  const folderId = req.body.folder_id ? Number(req.body.folder_id) : null;
+  db.prepare('UPDATE videos SET folder_id=? WHERE id=?').run(folderId, videoId);
+  const back = req.body.back || '/videos';
+  res.redirect(back + (back.includes('?') ? '&' : '?') + 'notice=Video+moved');
+});
+
+// Combined edit endpoint: rename title + optionally move folder.
+router.post('/:id/edit', (req, res) => {
+  const videoId = Number(req.params.id);
+  const video = db.prepare('SELECT * FROM videos WHERE id=?').get(videoId);
+  if (!video) return res.redirect('/videos?error=Video+not+found');
+  const newTitle = (req.body.title || '').trim();
+  const folderId = req.body.folder_id ? Number(req.body.folder_id) : null;
+  if (!newTitle) return res.redirect('/videos?error=Title+is+required');
+  // Check title uniqueness (only if changed).
+  if (newTitle !== video.title) {
+    const exists = db.prepare('SELECT 1 FROM videos WHERE title=? AND id<>?').get(newTitle, videoId);
+    if (exists) return res.redirect('/videos?error=Title+already+exists');
+  }
+  db.prepare('UPDATE videos SET title=?, folder_id=? WHERE id=?')
+    .run(newTitle, folderId, videoId);
+  const back = req.body.back || '/videos';
+  res.redirect(back + (back.includes('?') ? '&' : '?') + 'notice=Video+updated');
+});
+
+router.post('/:id/regen-thumb', (req, res) => {
+  const video = db.prepare('SELECT * FROM videos WHERE id=?').get(req.params.id);
+  if (!video) return res.redirect('/videos?error=Video+not+found');
+  const videoPath = path.join(uploadDir, video.filename);
+  if (!fs.existsSync(videoPath)) return res.redirect('/videos?error=File+not+found');
+  const thumb = transcoder.generateThumbnail(videoPath, video.id);
+  if (thumb) {
+    db.prepare('UPDATE videos SET thumbnail=? WHERE id=?').run(thumb, video.id);
+    res.redirect('/videos?notice=Thumbnail+generated');
+  } else {
+    res.redirect('/videos?error=Failed+to+generate+thumbnail');
+  }
 });
 
 module.exports = router;

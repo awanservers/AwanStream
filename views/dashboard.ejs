@@ -75,7 +75,7 @@
 </div>
 
 <h2 class="section-heading" style="margin-top:1.5rem">System</h2>
-<div class="stat-grid" style="grid-template-columns: repeat(3, 1fr)">
+<div class="stat-grid" style="grid-template-columns: repeat(5, 1fr)">
   <div class="card stat-card stat-card-plain">
     <div class="stat-icon stat-icon-blue">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h6v6H9z"/></svg>
@@ -94,6 +94,36 @@
       <div class="stat-num" id="sys-mem"><%= system.memPercent %>%</div>
       <div class="stat-label">Memory</div>
       <div class="stat-sub" id="sys-mem-sub"><%= (system.usedMem / (1024*1024*1024)).toFixed(1) %> / <%= (system.totalMem / (1024*1024*1024)).toFixed(1) %> GB</div>
+    </div>
+  </div>
+  <div class="card stat-card stat-card-plain">
+    <div class="stat-icon stat-icon-orange">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3"/></svg>
+    </div>
+    <div class="stat-body">
+      <div class="stat-num" id="sys-disk">
+        <% if (system.disk && system.disk.total > 0) { %><%= system.disk.percent %>%<% } else { %>-<% } %>
+      </div>
+      <div class="stat-label">Disk</div>
+      <div class="stat-sub" id="sys-disk-sub">
+        <% if (system.disk && system.disk.total > 0) { %>
+          <%= (system.disk.used / (1024*1024*1024)).toFixed(1) %> / <%= (system.disk.total / (1024*1024*1024)).toFixed(1) %> GB
+        <% } else { %>unavailable<% } %>
+      </div>
+    </div>
+  </div>
+  <div class="card stat-card stat-card-plain">
+    <div class="stat-icon stat-icon-teal">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
+    </div>
+    <div class="stat-body">
+      <div class="stat-num stat-num-sm">
+        <span class="net-arrow" title="Upload">↑</span> <span id="sys-net-up">—</span>
+      </div>
+      <div class="stat-label">Network</div>
+      <div class="stat-sub">
+        <span class="net-arrow" title="Download">↓</span> <span id="sys-net-down">—</span>
+      </div>
     </div>
   </div>
   <div class="card stat-card stat-card-plain">
@@ -118,19 +148,87 @@
     const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
     return (d > 0 ? d + 'd ' : '') + h + 'h ' + m + 'm';
   }
-  async function poll() {
-    try {
-      const r = await fetch('/api/system', { cache: 'no-store' });
-      if (!r.ok) return;
-      const d = await r.json();
-      document.getElementById('sys-cpu').textContent = d.cpuPercent + '%';
-      document.getElementById('sys-cpu-sub').textContent = d.cpuCount + ' cores · load ' + d.loadAvg[0].toFixed(2);
-      document.getElementById('sys-mem').textContent = d.memPercent + '%';
-      document.getElementById('sys-mem-sub').textContent = (d.usedMem / (1024*1024*1024)).toFixed(1) + ' / ' + (d.totalMem / (1024*1024*1024)).toFixed(1) + ' GB';
-      document.getElementById('sys-uptime').textContent = fmtUptime(d.uptime);
-    } catch (_) {}
+  function fmtSpeed(bps) {
+    if (bps == null || bps <= 0) return 'Idle';
+    if (bps < 1024) return bps + ' B/s';
+    if (bps < 1024 * 1024) return (bps / 1024).toFixed(0) + ' KB/s';
+    return (bps / (1024 * 1024)).toFixed(2) + ' MB/s';
   }
-  setInterval(poll, 3000);
+  function update(d) {
+    document.getElementById('sys-cpu').textContent = d.cpuPercent + '%';
+    document.getElementById('sys-cpu-sub').textContent = d.cpuCount + ' cores · load ' + d.loadAvg[0].toFixed(2);
+    document.getElementById('sys-mem').textContent = d.memPercent + '%';
+    document.getElementById('sys-mem-sub').textContent = (d.usedMem / (1024*1024*1024)).toFixed(1) + ' / ' + (d.totalMem / (1024*1024*1024)).toFixed(1) + ' GB';
+    document.getElementById('sys-uptime').textContent = fmtUptime(d.uptime);
+    if (d.disk && d.disk.total > 0) {
+      document.getElementById('sys-disk').textContent = d.disk.percent + '%';
+      document.getElementById('sys-disk-sub').textContent =
+        (d.disk.used / (1024*1024*1024)).toFixed(1) + ' / ' +
+        (d.disk.total / (1024*1024*1024)).toFixed(1) + ' GB';
+    }
+    if (d.net && d.net.available) {
+      document.getElementById('sys-net-up').textContent = fmtSpeed(d.net.upload);
+      document.getElementById('sys-net-down').textContent = fmtSpeed(d.net.download);
+    }
+  }
+
+  // Use SSE for real-time updates (no polling overhead).
+  // Fallback to polling if SSE connection fails.
+  if (window.EventSource) {
+    const es = new EventSource('/api/events');
+    let sseWorking = false;
+    es.onmessage = (e) => {
+      try { sseWorking = true; update(JSON.parse(e.data)); } catch (_) {}
+    };
+    es.onerror = () => {
+      // If SSE never worked, fall back to polling.
+      if (!sseWorking) {
+        es.close();
+        startPolling();
+      }
+    };
+  } else {
+    startPolling();
+  }
+
+  function startPolling() {
+    async function poll() {
+      try {
+        const r = await fetch('/api/system', { cache: 'no-store' });
+        if (r.ok) update(await r.json());
+      } catch (_) {}
+    }
+    poll();
+    setInterval(poll, 3000);
+  }
+})();
+
+// Live duration timer for running streams.
+(function () {
+  function fmtDuration(sec) {
+    const d = Math.floor(sec / 86400);
+    const h = Math.floor((sec % 86400) / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = Math.floor(sec % 60);
+    if (d > 0) return d + 'd ' + h + 'h ' + m + 'm';
+    if (h > 0) return h + 'h ' + m + 'm ' + s + 's';
+    return m + 'm ' + s + 's';
+  }
+  function update() {
+    document.querySelectorAll('.stream-timer[data-started-at]').forEach(el => {
+      const raw = el.dataset.startedAt;
+      if (!raw) return;
+      const iso = raw.includes('T') ? raw : raw.replace(' ', 'T') + 'Z';
+      const startMs = new Date(iso).getTime();
+      if (Number.isNaN(startMs)) return;
+      const elapsed = Math.max(0, Math.floor((Date.now() - startMs) / 1000));
+      el.innerHTML = '🔴 <strong>' + fmtDuration(elapsed) + '</strong>';
+    });
+  }
+  if (document.querySelectorAll('.stream-timer').length > 0) {
+    update();
+    setInterval(update, 1000);
+  }
 })();
 </script>
 
@@ -141,34 +239,62 @@
   </div>
 <% } else { %>
   <div class="table-wrap card card-flush">
-    <table class="table">
+    <table class="table videos-table">
       <thead><tr>
-        <th class="col-w-title">Name</th>
-        <th class="col-w-title">Video</th>
+        <th class="col-w-thumb"></th>
+        <th class="col-w-title">Stream</th>
         <th class="col-w-platform">Platform</th>
         <th class="col-w-status">Status</th>
-        <th class="col-w-date">Last run</th>
+        <th class="col-w-actions">Actions</th>
       </tr></thead>
       <tbody>
         <% recentStreams.forEach(s => { %>
           <tr>
-            <td class="truncate" title="<%= s.name %>"><%= s.name %></td>
-            <td class="truncate" title="<%= s.video_title || '(deleted)' %>"><%= s.video_title || '(deleted)' %></td>
-            <td><%= s.platform %></td>
-            <td><span class="badge badge-<%= s.status %>"><%= s.status %></span></td>
-            <td class="col-date small muted">
-              <% if (s.status === 'running') { %>
-                started <%= formatTime(s.started_at) %>
-              <% } else if (s.stopped_at) { %>
-                <%= formatTime(s.stopped_at) %>
+            <td class="col-thumb">
+              <% if (s.video_thumb) { %>
+                <img src="/uploads/thumbs/<%= s.video_thumb %>" alt="" class="video-thumb" loading="lazy" style="width:140px;height:79px">
               <% } else { %>
-                -
+                <div class="video-thumb video-thumb-empty" style="width:140px;height:79px;cursor:default">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="14" height="14" rx="2"/><path d="M22 7l-6 5 6 5V7z"/></svg>
+                </div>
               <% } %>
+            </td>
+            <td class="video-title-cell">
+              <div class="video-title"><%= s.name %></div>
+              <div class="video-meta small muted"><%= s.video_title || '(deleted)' %><%= s.playlist_name ? ' · Playlist: ' + s.playlist_name : '' %></div>
+            </td>
+            <td><%= s.platform.charAt(0).toUpperCase() + s.platform.slice(1) %></td>
+            <td>
+              <span class="badge badge-<%= s.status %>"><%= s.status %></span>
+              <% if (s.status === 'running' && s.started_at) { %>
+                <div class="stream-timer small" data-started-at="<%= s.started_at %>"></div>
+              <% } %>
+            </td>
+            <td class="actions">
+              <% if (s.status === 'running') { %>
+                <form method="POST" action="/streams/<%= s.id %>/stop" class="inline">
+                  <button class="btn-icon btn-icon-warn" type="submit" title="Stop">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+                  </button>
+                </form>
+              <% } else { %>
+                <form method="POST" action="/streams/<%= s.id %>/start" class="inline">
+                  <button class="btn-icon btn-icon-primary" type="submit" title="Start">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                  </button>
+                </form>
+              <% } %>
+              <a href="/streams/<%= s.playlist_id ? 'playlist' : 'single' %>" class="btn-icon" title="Go to streams">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+              </a>
             </td>
           </tr>
         <% }) %>
       </tbody>
     </table>
   </div>
+  <% if (typeof historyCount !== 'undefined' && historyCount > 0) { %>
+    <p class="muted small" style="margin-top:0.5rem"><a href="/history">View full history (<%= historyCount %> entries)</a></p>
+  <% } %>
 <% } %>
 <%- include('partials/footer') %>

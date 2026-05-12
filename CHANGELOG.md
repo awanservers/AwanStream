@@ -8,6 +8,14 @@ Versi belum di-tag — pakai tanggal sebagai penanda release.
 ## [Unreleased]
 
 ### Added
+- **Stream History** — riwayat semua sesi streaming yang sudah selesai. Otomatis tercatat saat stream stop (manual atau natural finish) atau error. Halaman `/history` menampilkan stream name, video, platform, durasi, status, dan waktu. Bisa hapus per-entry atau clear all. Minimum 10 detik durasi untuk tercatat.
+- **Auto-Retry with Exponential Backoff** — kalau FFmpeg crash (exit code non-zero), stream otomatis retry hingga 5x dengan delay exponential (3s → 60s max + jitter). User stop = no retry. Retry status terlihat di `last_error` stream. Reset otomatis setelah stream berhasil jalan.
+- **Stream Health Check** — polling setiap 30 detik mendeteksi stream yang stale (tidak ada output FFmpeg selama 5 menit). Stream stale otomatis di-kill dan masuk retry logic.
+- **Shuffle Playlist** — opsi shuffle di playlist. Kalau aktif, video berikutnya dipilih acak (bukan sequential). Bisa di-toggle dari halaman playlist detail. Kolom baru `playlists.shuffle`.
+- **Video Folders** — organisasi library video dengan folder. Create/rename/delete folder, move video antar folder, filter library per folder. Upload langsung ke folder aktif. Tabel baru `folders`, kolom baru `videos.folder_id`.
+- **Video Thumbnails** — auto-generate thumbnail (320px JPEG) dari frame video saat upload dan setelah Prepare. Ditampilkan di library table. Thumbnail diambil dari ~10% durasi video. Bisa regenerate manual via tombol. Disimpan di `public/uploads/thumbs/`, kolom baru `videos.thumbnail`.
+- **Stream Duration Timer** — live counter yang menampilkan berapa lama stream sudah berjalan (🔴 2h 15m 30s). Update setiap detik via JavaScript. Tampil di halaman Streams (single + playlist) dan Dashboard. Format adaptif: detik → menit → jam → hari.
+- **Chunked Upload (Resumable)** — file > 50 MB otomatis di-upload dalam chunk 10 MB. Progress bar dengan speed + ETA. Bisa dibatalkan mid-upload. Chunk disimpan sementara di `public/uploads/chunks/`, di-merge saat finalize. Auto-cleanup session stale (24 jam). File kecil tetap pakai XHR upload biasa. Module baru: `src/chunkUpload.js`.
 - **Import video dari URL** — support Google Drive, Mega.nz, MediaFire, dan direct link. Server-side download via `axios` + `megajs`. Progress tracking per job. Module baru: `src/downloader.js`.
 - **Playlist management** — halaman `/playlists` untuk create/delete playlist, `/playlists/:id` untuk add/remove/reorder video. Tabel baru: `playlists`, `playlist_items`.
 - **Stream — Playlist mode** — halaman `/streams/playlist` terpisah dari single video. Stream dari playlist auto-advance ke video berikutnya secara sequential. Option `loop_playlist` untuk wrap around ke awal.

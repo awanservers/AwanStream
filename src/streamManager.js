@@ -7,8 +7,20 @@ const { db } = require('./db');
 const logsDir = path.join(__dirname, '..', 'logs');
 if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
 
-// streamId -> { process, logStream }
+// streamId -> { process, logStream, lastActivity }
 const running = new Map();
+
+// Auto-retry state
+const retryCount = new Map();       // streamId -> number
+const retryStopped = new Set();     // streamIds where user explicitly stopped (no retry)
+const MAX_RETRIES = 5;
+const BASE_RETRY_DELAY = 3000;      // 3 seconds
+const MAX_RETRY_DELAY = 60000;      // 60 seconds
+
+// Health check interval (detect stale streams)
+const HEALTH_CHECK_INTERVAL = 30000; // 30 seconds
+const STALE_THRESHOLD = 5 * 60 * 1000; // 5 minutes no activity = stale
+let healthCheckTimer = null;
 
 function buildRtmpTarget(rtmpUrl, key) {
   const trimmed = rtmpUrl.replace(/\/+$/, '');
@@ -17,13 +29,11 @@ function buildRtmpTarget(rtmpUrl, key) {
 
 function redact(text, secret) {
   if (!secret) return text;
-  // Escape regex special chars in the secret and replace all occurrences.
   const escaped = secret.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return text.replace(new RegExp(escaped, 'g'), '***REDACTED***');
 }
 
 function makeRedactingStream(logStream, secret) {
-  // Wraps writes so we never persist the stream key to disk.
   return {
     write(chunk) {
       const text = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk);
@@ -31,6 +41,16 @@ function makeRedactingStream(logStream, secret) {
     },
     end() { logStream.end(); },
   };
+}
+
+/**
+ * Calculate retry delay with exponential backoff + jitter.
+ */
+function getRetryDelay(attempt) {
+  const delay = Math.min(BASE_RETRY_DELAY * Math.pow(2, attempt), MAX_RETRY_DELAY);
+  // Add jitter: ±25%
+  const jitter = delay * 0.25 * (Math.random() * 2 - 1);
+  return Math.round(delay + jitter);
 }
 
 function startStream(stream, videoPath) {
@@ -41,6 +61,9 @@ function startStream(stream, videoPath) {
     throw new Error('Video file not found: ' + videoPath);
   }
 
+  // Clear retry-stopped flag on fresh manual start.
+  retryStopped.delete(stream.id);
+
   const target = buildRtmpTarget(stream.rtmp_url, stream.stream_key);
   const args = [
     '-hide_banner',
@@ -50,21 +73,14 @@ function startStream(stream, videoPath) {
   if (stream.loop_video) args.push('-stream_loop', '-1');
   args.push(
     '-i', videoPath,
-    // Only take the first video + (optional) first audio track.
-    // Skips cover-art / attachment streams that cause "Unknown cover type" warnings.
     '-map', '0:v:0',
     '-map', '0:a:0?',
   );
 
   if (stream.re_encode) {
-    // Re-encode to enforce keyframe interval. YouTube wants <= 4s keyframes;
-    // default 2s gives good seek and rebuffer behavior.
     const kf = Math.max(1, Number(stream.keyframe_interval) || 2);
-    // Assume source ~30fps; GOP = kf * fps. We don't probe fps here so we use 60
-    // as a safe upper bound (it clamps effectively via -force_key_frames).
     const gop = kf * 60;
     const vb = stream.video_bitrate || '2500k';
-    // bufsize = 2x bitrate is a common default. Parse "NNNNk" / "NNNNNN".
     const m = /^(\d+)\s*([kKmM]?)$/.exec(vb);
     let bufsize = '5000k';
     if (m) {
@@ -91,7 +107,6 @@ function startStream(stream, videoPath) {
       '-ac', '2',
     );
   } else {
-    // Stream-copy (no CPU cost, but keyframe interval depends on source file).
     args.push(
       '-c:v', 'copy',
       '-c:a', 'aac',
@@ -114,27 +129,44 @@ function startStream(stream, videoPath) {
   safeLog.write(`\n=== ${new Date().toISOString()} starting ffmpeg ${safeArgs.join(' ')}\n`);
 
   const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
-  proc.stdout.on('data', (c) => safeLog.write(c));
-  proc.stderr.on('data', (c) => safeLog.write(c));
+  proc.stdout.on('data', (c) => {
+    safeLog.write(c);
+    updateActivity(stream.id);
+  });
+  proc.stderr.on('data', (c) => {
+    safeLog.write(c);
+    updateActivity(stream.id);
+  });
 
   db.prepare(`UPDATE streams
     SET status='running', started_at=CURRENT_TIMESTAMP, stopped_at=NULL, last_error=NULL
     WHERE id=?`).run(stream.id);
 
-  running.set(stream.id, { process: proc, logStream: safeLog });
+  running.set(stream.id, { process: proc, logStream: safeLog, lastActivity: Date.now() });
 
   proc.on('exit', (code, signal) => {
     safeLog.write(`\n=== ${new Date().toISOString()} ffmpeg exit code=${code} signal=${signal}\n`);
     safeLog.end();
     running.delete(stream.id);
     const info = db.prepare('SELECT status FROM streams WHERE id=?').get(stream.id);
+
     // If the user stopped it we already set status to idle; only overwrite when still marked running.
     if (info && info.status === 'running') {
       const failed = code !== 0 && signal !== 'SIGTERM';
       if (failed) {
-        db.prepare(`UPDATE streams
-          SET status='error', stopped_at=CURRENT_TIMESTAMP, last_error=?
-          WHERE id=?`).run(`ffmpeg exited with code ${code}`, stream.id);
+        // Check if we should auto-retry.
+        if (!retryStopped.has(stream.id) && shouldRetry(stream.id)) {
+          scheduleRetry(stream, videoPath, code);
+        } else {
+          // Max retries reached or user stopped — mark as error.
+          const errMsg = `ffmpeg exited with code ${code}`;
+          db.prepare(`UPDATE streams
+            SET status='error', stopped_at=CURRENT_TIMESTAMP, last_error=?
+            WHERE id=?`).run(errMsg, stream.id);
+          const fullStream = db.prepare('SELECT * FROM streams WHERE id=?').get(stream.id);
+          if (fullStream) saveHistory(fullStream, 'error', errMsg);
+          retryCount.delete(stream.id);
+        }
       } else {
         // Normal exit (video finished, non-loop). Check if playlist has next video.
         const advanced = advancePlaylist(stream);
@@ -142,7 +174,11 @@ function startStream(stream, videoPath) {
           db.prepare(`UPDATE streams
             SET status='idle', stopped_at=CURRENT_TIMESTAMP
             WHERE id=?`).run(stream.id);
+          const fullStream = db.prepare('SELECT * FROM streams WHERE id=?').get(stream.id);
+          if (fullStream) saveHistory(fullStream, 'completed', null);
         }
+        // Reset retry count on successful completion.
+        retryCount.delete(stream.id);
       }
     }
   });
@@ -152,11 +188,107 @@ function startStream(stream, videoPath) {
   });
 }
 
+/**
+ * Check if we should retry this stream.
+ */
+function shouldRetry(streamId) {
+  const count = retryCount.get(streamId) || 0;
+  return count < MAX_RETRIES;
+}
+
+/**
+ * Schedule a retry with exponential backoff.
+ */
+function scheduleRetry(stream, videoPath, exitCode) {
+  const count = retryCount.get(stream.id) || 0;
+  const delay = getRetryDelay(count);
+  retryCount.set(stream.id, count + 1);
+
+  const attempt = count + 1;
+  const errMsg = `ffmpeg crashed (code ${exitCode}), retry ${attempt}/${MAX_RETRIES} in ${Math.round(delay / 1000)}s`;
+  db.prepare(`UPDATE streams SET last_error=? WHERE id=?`).run(errMsg, stream.id);
+
+  // Log the retry attempt.
+  const logPath = path.join(logsDir, `stream-${stream.id}.log`);
+  try {
+    fs.appendFileSync(logPath, `\n=== ${new Date().toISOString()} ${errMsg}\n`);
+  } catch (_) {}
+
+  setTimeout(() => {
+    // Re-check: user might have stopped or deleted the stream during the delay.
+    if (retryStopped.has(stream.id)) {
+      retryCount.delete(stream.id);
+      return;
+    }
+    const current = db.prepare('SELECT * FROM streams WHERE id=?').get(stream.id);
+    if (!current || current.status === 'idle') {
+      retryCount.delete(stream.id);
+      return;
+    }
+    // Re-read video path in case it changed.
+    const video = db.prepare('SELECT filename FROM videos WHERE id=?').get(current.video_id);
+    if (!video) {
+      db.prepare(`UPDATE streams SET status='error', last_error=? WHERE id=?`)
+        .run('Retry failed: video not found', stream.id);
+      retryCount.delete(stream.id);
+      return;
+    }
+    const newVideoPath = path.join(__dirname, '..', 'public', 'uploads', video.filename);
+    try {
+      startStream(current, newVideoPath);
+    } catch (e) {
+      db.prepare(`UPDATE streams SET status='error', stopped_at=CURRENT_TIMESTAMP, last_error=? WHERE id=?`)
+        .run('Retry failed: ' + e.message, stream.id);
+      const fullStream = db.prepare('SELECT * FROM streams WHERE id=?').get(stream.id);
+      if (fullStream) saveHistory(fullStream, 'error', 'Retry failed: ' + e.message);
+      retryCount.delete(stream.id);
+    }
+  }, delay);
+}
+
+function saveHistory(stream, status, errorMsg) {
+  try {
+    const video = db.prepare('SELECT title FROM videos WHERE id=?').get(stream.video_id);
+    const startedAt = stream.started_at || null;
+    const stoppedAt = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
+    let durationSeconds = 0;
+    if (startedAt) {
+      const startIso = startedAt.includes('T') ? startedAt : startedAt.replace(' ', 'T') + 'Z';
+      const startMs = new Date(startIso).getTime();
+      const stopMs = Date.now();
+      if (!Number.isNaN(startMs)) {
+        durationSeconds = Math.max(0, Math.round((stopMs - startMs) / 1000));
+      }
+    }
+    // Only save history if stream ran for at least 10 seconds.
+    if (durationSeconds < 10) return;
+    db.prepare(`INSERT INTO stream_history
+      (stream_id, stream_name, video_title, platform, started_at, stopped_at, duration_seconds, status, last_error)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      stream.id,
+      stream.name,
+      video ? video.title : '(deleted)',
+      stream.platform || 'custom',
+      startedAt,
+      stoppedAt,
+      durationSeconds,
+      status,
+      errorMsg || null,
+    );
+  } catch (_) { /* non-critical — don't break stream lifecycle */ }
+}
+
 function stopStream(streamId) {
   const entry = running.get(streamId);
+  // Mark as user-stopped so retry logic won't kick in.
+  retryStopped.add(streamId);
+  retryCount.delete(streamId);
+  // Read stream info before updating status (we need started_at for duration calc).
+  const stream = db.prepare('SELECT * FROM streams WHERE id=?').get(streamId);
   db.prepare(`UPDATE streams
     SET status='idle', stopped_at=CURRENT_TIMESTAMP
     WHERE id=?`).run(streamId);
+  if (stream) saveHistory(stream, 'completed', null);
   if (!entry) return false;
   try { entry.process.kill('SIGTERM'); } catch (_) {}
   return true;
@@ -166,10 +298,60 @@ function isRunning(streamId) {
   return running.has(streamId);
 }
 
+/**
+ * Get retry info for a stream (used by UI to show retry status).
+ */
+function getRetryInfo(streamId) {
+  const count = retryCount.get(streamId);
+  if (count === undefined) return null;
+  return { attempt: count, maxRetries: MAX_RETRIES };
+}
+
 function reconcileOnBoot() {
   // Any stream marked running from a previous process is no longer actually running.
   db.prepare(`UPDATE streams SET status='idle', stopped_at=CURRENT_TIMESTAMP
     WHERE status='running'`).run();
+  // Start health check timer.
+  startHealthCheck();
+}
+
+/**
+ * Update last activity timestamp for a stream (called on FFmpeg output).
+ */
+function updateActivity(streamId) {
+  const entry = running.get(streamId);
+  if (entry) entry.lastActivity = Date.now();
+}
+
+/**
+ * Periodic health check: detect stale streams (no FFmpeg output for STALE_THRESHOLD).
+ * A stale stream likely means FFmpeg is hung — kill and let retry logic handle it.
+ */
+function healthCheck() {
+  const now = Date.now();
+  for (const [streamId, entry] of running) {
+    if (entry.lastActivity && (now - entry.lastActivity) > STALE_THRESHOLD) {
+      // Stream is stale — FFmpeg hasn't produced output in 5 minutes.
+      const logPath = path.join(logsDir, `stream-${streamId}.log`);
+      try {
+        fs.appendFileSync(logPath, `\n=== ${new Date().toISOString()} health check: stream stale (no output for ${Math.round(STALE_THRESHOLD / 1000)}s), killing process\n`);
+      } catch (_) {}
+      try { entry.process.kill('SIGKILL'); } catch (_) {}
+      // The exit handler will fire and trigger retry logic.
+    }
+  }
+}
+
+function startHealthCheck() {
+  if (healthCheckTimer) return;
+  healthCheckTimer = setInterval(healthCheck, HEALTH_CHECK_INTERVAL);
+}
+
+function stopHealthCheck() {
+  if (healthCheckTimer) {
+    clearInterval(healthCheckTimer);
+    healthCheckTimer = null;
+  }
 }
 
 // Playlist advancement: when a video finishes (non-loop), check if the stream
@@ -190,13 +372,26 @@ function advancePlaylist(stream) {
 
   // Find current video position.
   const currentIdx = items.findIndex(i => i.video_id === stream.video_id);
-  let nextIdx = currentIdx + 1;
+  let nextIdx;
 
-  if (nextIdx >= items.length) {
-    if (playlist.loop_playlist) {
-      nextIdx = 0; // wrap around
+  if (playlist.shuffle) {
+    // Shuffle mode: pick a random video that isn't the current one.
+    if (items.length === 1) {
+      nextIdx = 0;
     } else {
-      return false; // playlist finished
+      do {
+        nextIdx = Math.floor(Math.random() * items.length);
+      } while (nextIdx === currentIdx);
+    }
+  } else {
+    // Sequential mode.
+    nextIdx = currentIdx + 1;
+    if (nextIdx >= items.length) {
+      if (playlist.loop_playlist) {
+        nextIdx = 0; // wrap around
+      } else {
+        return false; // playlist finished
+      }
     }
   }
 
@@ -229,8 +424,6 @@ function tailLog(streamId, lines = 80) {
   if (!fs.existsSync(logPath)) return '';
   const data = fs.readFileSync(logPath, 'utf8').split('\n');
   let text = data.slice(-lines).join('\n');
-  // Defense in depth: redact this stream's current key if it somehow slipped into
-  // the log file (e.g. from a pre-redaction run).
   try {
     const s = db.prepare('SELECT stream_key FROM streams WHERE id=?').get(streamId);
     if (s && s.stream_key) {
@@ -241,4 +434,4 @@ function tailLog(streamId, lines = 80) {
   return text;
 }
 
-module.exports = { startStream, stopStream, isRunning, reconcileOnBoot, tailLog };
+module.exports = { startStream, stopStream, isRunning, getRetryInfo, reconcileOnBoot, tailLog };

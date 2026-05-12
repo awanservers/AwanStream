@@ -31,27 +31,56 @@
             <td class="truncate" title="<%= s.name %>"><%= s.name %></td>
             <td class="truncate" title="<%= s.playlist_name || '-' %>"><%= s.playlist_name || '-' %></td>
             <td class="truncate small muted" title="<%= s.video_title || '-' %>"><%= s.video_title || '-' %></td>
-            <td><%= s.platform %></td>
+            <td><%= presets[s.platform] ? presets[s.platform].label : s.platform %></td>
             <td>
               <span class="badge badge-<%= s.status %>"><%= s.status %></span>
+              <% if (s.status === 'running' && s.started_at) { %>
+                <span class="stream-timer small" data-started-at="<%= s.started_at %>"></span>
+              <% } %>
               <% if (s.last_error) { %><div class="small muted"><%= s.last_error %></div><% } %>
             </td>
             <td class="actions">
               <% if (s.status === 'running') { %>
                 <form method="POST" action="/streams/<%= s.id %>/stop" class="inline">
-                  <button class="btn btn-warn" type="submit">Stop</button>
+                  <button class="btn-icon btn-icon-warn" type="submit" title="Stop stream">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+                  </button>
                 </form>
               <% } else { %>
                 <form method="POST" action="/streams/<%= s.id %>/start" class="inline">
-                  <button class="btn btn-primary" type="submit">Start</button>
+                  <button class="btn-icon btn-icon-primary" type="submit" title="Start stream">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                  </button>
                 </form>
               <% } %>
-              <a class="btn btn-link" href="/streams/<%= s.id %>/log" target="_blank">Log</a>
+              <button type="button" class="btn-icon"
+                      data-open-modal="edit-stream-pl"
+                      data-stream-id="<%= s.id %>"
+                      data-stream-name="<%= s.name %>"
+                      data-stream-playlist-id="<%= s.playlist_id %>"
+                      data-stream-platform="<%= s.platform %>"
+                      data-stream-rtmp-url="<%= s.rtmp_url %>"
+                      data-stream-key="<%= s.stream_key %>"
+                      data-stream-loop="<%= s.loop_video %>"
+                      data-stream-re-encode="<%= s.re_encode %>"
+                      title="Edit">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+              </button>
+              <button type="button" class="btn-icon"
+                      data-open-modal="stream-log"
+                      data-stream-id="<%= s.id %>"
+                      data-stream-name="<%= s.name %>"
+                      data-stream-status="<%= s.status %>"
+                      title="View log">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+              </button>
               <form method="POST" action="/streams/<%= s.id %>/delete" class="inline"
                     data-confirm="Hapus stream '<%= s.name %>'?"
                     data-confirm-title="Hapus stream"
                     data-confirm-action="Hapus">
-                <button class="btn btn-danger" type="submit">Delete</button>
+                <button class="btn-icon btn-icon-danger" type="submit" title="Delete">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+                </button>
               </form>
             </td>
           </tr>
@@ -89,14 +118,23 @@
               </select>
             </label>
             <label>Platform
-              <select name="platform" id="platform-select-pl">
+              <select name="platform" id="platform-select-pl" required>
+                <option value="" disabled selected>Select platform…</option>
                 <% Object.keys(presets).forEach(p => { %>
-                  <option value="<%= p %>" data-url="<%= presets[p] %>"><%= p %></option>
+                  <option value="<%= p %>" data-url="<%= presets[p].url %>"><%= presets[p].label %></option>
                 <% }) %>
               </select>
             </label>
             <label>RTMP URL <input name="rtmp_url" id="rtmp-url-pl" required placeholder="rtmp://..."></label>
-            <label class="full">Stream key <input name="stream_key" required placeholder="xxxx-xxxx-xxxx"></label>
+            <label class="full">Stream key
+              <div class="input-with-toggle">
+                <input type="password" name="stream_key" id="new-stream-key-pl" required placeholder="xxxx-xxxx-xxxx" autocomplete="off">
+                <button type="button" class="input-toggle" data-toggle-input="new-stream-key-pl" aria-label="Show/hide stream key">
+                  <svg class="eye-show" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                  <svg class="eye-hide" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                </button>
+              </div>
+            </label>
             <label class="full inline-check">
               <input type="checkbox" name="loop_video" value="1" checked>
               Loop playlist (setelah video terakhir, mulai dari awal)
@@ -118,4 +156,192 @@
     <% } %>
   </div>
 </dialog>
+
+<!-- Edit playlist stream modal -->
+<% if (playlists.length > 0) { %>
+<dialog id="edit-stream-pl" class="modal">
+  <div class="modal-card">
+    <header class="modal-header">
+      <h2>Edit stream</h2>
+      <button type="button" class="modal-close" data-close-modal aria-label="Close">×</button>
+    </header>
+    <form method="POST" id="edit-stream-pl-form">
+      <input type="hidden" name="re_encode" id="edit-pl-re-encode" value="0">
+      <div class="modal-body">
+        <div class="grid-2">
+          <label>Name <input name="name" id="edit-pl-stream-name" required></label>
+          <label>Playlist
+            <select name="playlist_id" id="edit-pl-stream-playlist" required>
+              <% playlists.forEach(p => { %>
+                <option value="<%= p.id %>"><%= p.name %> (<%= p.item_count %> videos)</option>
+              <% }) %>
+            </select>
+          </label>
+          <label>Platform
+            <select name="platform" id="edit-pl-stream-platform" required>
+              <% Object.keys(presets).forEach(p => { %>
+                <option value="<%= p %>" data-url="<%= presets[p].url %>"><%= presets[p].label %></option>
+              <% }) %>
+            </select>
+          </label>
+          <label>RTMP URL <input name="rtmp_url" id="edit-pl-stream-rtmp" required></label>
+          <label class="full">Stream key
+            <div class="input-with-toggle">
+              <input type="password" name="stream_key" id="edit-pl-stream-key" required autocomplete="off">
+              <button type="button" class="input-toggle" data-toggle-input="edit-pl-stream-key" aria-label="Show/hide stream key">
+                <svg class="eye-show" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                <svg class="eye-hide" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+              </button>
+            </div>
+          </label>
+          <label class="full inline-check">
+            <input type="checkbox" name="loop_video" value="1" id="edit-pl-stream-loop">
+            Loop playlist (setelah video terakhir, mulai dari awal)
+          </label>
+        </div>
+      </div>
+      <footer class="modal-footer">
+        <button type="button" class="btn" data-close-modal>Batal</button>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </footer>
+    </form>
+  </div>
+</dialog>
+<script>
+(function() {
+  const platSel = document.getElementById('edit-pl-stream-platform');
+  const rtmpInput = document.getElementById('edit-pl-stream-rtmp');
+  if (platSel && rtmpInput) {
+    platSel.addEventListener('change', () => {
+      const u = platSel.options[platSel.selectedIndex].dataset.url;
+      if (u) rtmpInput.value = u;
+    });
+  }
+  document.addEventListener('modal:before-open', (e) => {
+    if (e.detail.id !== 'edit-stream-pl') return;
+    const btn = e.detail.trigger;
+    if (!btn) return;
+    document.getElementById('edit-stream-pl-form').action = '/streams/' + btn.dataset.streamId + '/edit';
+    document.getElementById('edit-pl-stream-name').value = btn.dataset.streamName || '';
+    document.getElementById('edit-pl-stream-playlist').value = btn.dataset.streamPlaylistId || '';
+    document.getElementById('edit-pl-stream-platform').value = btn.dataset.streamPlatform || 'custom';
+    document.getElementById('edit-pl-stream-rtmp').value = btn.dataset.streamRtmpUrl || '';
+    document.getElementById('edit-pl-stream-key').value = btn.dataset.streamKey || '';
+    document.getElementById('edit-pl-stream-loop').checked = btn.dataset.streamLoop === '1';
+    document.getElementById('edit-pl-re-encode').value = btn.dataset.streamReEncode || '0';
+  });
+})();
+</script>
+<% } %>
+
+<!-- Stream log modal -->
+<dialog id="stream-log" class="modal modal-lg">
+  <div class="modal-card">
+    <header class="modal-header">
+      <h2>Log: <span id="stream-log-name">…</span></h2>
+      <button type="button" class="modal-close" data-close-modal aria-label="Close">×</button>
+    </header>
+    <div class="modal-body">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
+        <span class="small muted" id="stream-log-status">Loading…</span>
+        <label class="inline-check small" style="margin:0">
+          <input type="checkbox" id="stream-log-autoscroll" checked>
+          Auto-scroll
+        </label>
+      </div>
+      <pre class="log-box" id="stream-log-content" style="max-height:400px">Loading…</pre>
+    </div>
+    <footer class="modal-footer">
+      <button type="button" class="btn" id="stream-log-refresh">Refresh</button>
+      <button type="button" class="btn" data-close-modal>Close</button>
+    </footer>
+  </div>
+</dialog>
+<script>
+(function() {
+  const dlg = document.getElementById('stream-log');
+  if (!dlg) return;
+  const nameEl = document.getElementById('stream-log-name');
+  const statusEl = document.getElementById('stream-log-status');
+  const contentEl = document.getElementById('stream-log-content');
+  const autoscrollEl = document.getElementById('stream-log-autoscroll');
+  const refreshBtn = document.getElementById('stream-log-refresh');
+  let currentStreamId = null;
+  let pollTimer = null;
+  let isRunning = false;
+
+  async function fetchLog() {
+    if (!currentStreamId) return;
+    try {
+      const r = await fetch('/streams/' + currentStreamId + '/log', { cache: 'no-store' });
+      if (!r.ok) {
+        statusEl.textContent = 'Failed to load log (' + r.status + ')';
+        return;
+      }
+      const text = await r.text();
+      const wasAtBottom = contentEl.scrollHeight - contentEl.scrollTop - contentEl.clientHeight < 20;
+      contentEl.textContent = text || '(log empty)';
+      if (autoscrollEl.checked && (wasAtBottom || contentEl.textContent === '(log empty)')) {
+        contentEl.scrollTop = contentEl.scrollHeight;
+      }
+      statusEl.textContent = isRunning
+        ? '🔴 Live · auto-refresh 3s'
+        : 'Last log (stream idle)';
+    } catch (err) {
+      statusEl.textContent = 'Network error';
+    }
+  }
+
+  document.addEventListener('modal:before-open', (e) => {
+    if (e.detail.id !== 'stream-log') return;
+    const btn = e.detail.trigger;
+    if (!btn) return;
+    currentStreamId = btn.dataset.streamId;
+    nameEl.textContent = btn.dataset.streamName || '';
+    isRunning = btn.dataset.streamStatus === 'running';
+    statusEl.textContent = 'Loading…';
+    contentEl.textContent = 'Loading…';
+    fetchLog();
+    if (pollTimer) clearInterval(pollTimer);
+    if (isRunning) pollTimer = setInterval(fetchLog, 3000);
+  });
+
+  dlg.addEventListener('close', () => {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    currentStreamId = null;
+  });
+
+  refreshBtn.addEventListener('click', fetchLog);
+})();
+</script>
+
+<script>
+// Live duration timer for running streams.
+(function () {
+  function fmtDuration(sec) {
+    const d = Math.floor(sec / 86400);
+    const h = Math.floor((sec % 86400) / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = Math.floor(sec % 60);
+    if (d > 0) return d + 'd ' + h + 'h ' + m + 'm';
+    if (h > 0) return h + 'h ' + m + 'm ' + s + 's';
+    return m + 'm ' + s + 's';
+  }
+  function update() {
+    document.querySelectorAll('.stream-timer[data-started-at]').forEach(el => {
+      const raw = el.dataset.startedAt;
+      if (!raw) return;
+      const iso = raw.includes('T') ? raw : raw.replace(' ', 'T') + 'Z';
+      const startMs = new Date(iso).getTime();
+      if (Number.isNaN(startMs)) return;
+      const elapsed = Math.max(0, Math.floor((Date.now() - startMs) / 1000));
+      el.innerHTML = '🔴 <strong>' + fmtDuration(elapsed) + '</strong>';
+    });
+  }
+  if (document.querySelectorAll('.stream-timer').length > 0) {
+    update();
+    setInterval(update, 1000);
+  }
+})();
+</script>
 <%- include('partials/footer') %>

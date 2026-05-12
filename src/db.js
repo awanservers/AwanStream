@@ -62,6 +62,7 @@ function ensureSchema() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
       loop_playlist INTEGER NOT NULL DEFAULT 1,
+      shuffle INTEGER NOT NULL DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -72,6 +73,26 @@ function ensureSchema() {
       position INTEGER NOT NULL DEFAULT 0,
       FOREIGN KEY (playlist_id) REFERENCES playlists(id) ON DELETE CASCADE,
       FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS stream_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      stream_id INTEGER,
+      stream_name TEXT NOT NULL,
+      video_title TEXT,
+      platform TEXT,
+      started_at DATETIME,
+      stopped_at DATETIME,
+      duration_seconds INTEGER DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'completed',
+      last_error TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS folders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
   `);
 
@@ -102,6 +123,14 @@ function ensureSchema() {
   addv('src_width', 'INTEGER', 'NULL');
   addv('src_height', 'INTEGER', 'NULL');
   addv('src_fps', 'REAL', 'NULL');
+  addv('folder_id', 'INTEGER', 'NULL');
+  addv('thumbnail', 'TEXT', 'NULL');
+
+  // Playlist migrations.
+  const pcols = db.prepare('PRAGMA table_info(playlists)').all().map((c) => c.name);
+  if (!pcols.includes('shuffle')) {
+    db.exec(`ALTER TABLE playlists ADD COLUMN shuffle INTEGER NOT NULL DEFAULT 0`);
+  }
 }
 
 module.exports = { db, ensureSchema };

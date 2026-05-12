@@ -133,6 +133,27 @@
         }
       });
     })();
+
+    // Global password / stream-key show/hide toggle.
+    // Any <button class="input-toggle" data-toggle-input="<input id>"> toggles
+    // the associated input between type=password and type=text, and swaps
+    // eye-show / eye-hide icons inside itself.
+    (function () {
+      document.addEventListener('click', (e) => {
+        const btn = e.target.closest('.input-toggle');
+        if (!btn) return;
+        e.preventDefault();
+        const id = btn.dataset.toggleInput;
+        const input = document.getElementById(id);
+        if (!input) return;
+        const show = input.type === 'password';
+        input.type = show ? 'text' : 'password';
+        const showIcon = btn.querySelector('.eye-show');
+        const hideIcon = btn.querySelector('.eye-hide');
+        if (showIcon) showIcon.style.display = show ? 'none' : '';
+        if (hideIcon) hideIcon.style.display = show ? '' : 'none';
+      });
+    })();
   </script>
 <% } else { %>
   </main>

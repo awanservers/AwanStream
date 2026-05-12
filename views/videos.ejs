@@ -1,13 +1,51 @@
 <%- include('partials/header', {
   title: 'Videos',
   activeNav: 'videos',
-  pageTitle: 'Videos',
-  pageSubtitle: 'Upload, prepare, dan kelola library video.',
+  pageTitle: typeof currentFolder !== 'undefined' && currentFolder ? currentFolder.name : 'Videos',
+  pageSubtitle: typeof currentFolder !== 'undefined' && currentFolder ? 'Folder · ' + videos.length + ' video' : 'Upload, prepare, dan kelola library video.',
   topbarActions: `
     <button type="button" class="btn btn-primary" data-open-modal="upload">+ Upload video</button>
   `,
 }) %>
 <%- include('partials/flash', { error, notice }) %>
+
+<div class="folder-bar">
+  <div class="folder-list">
+    <a href="/videos" class="folder-chip <%= (typeof currentFolder === 'undefined' || !currentFolder) ? 'active' : '' %>">
+      All (<%= videos.length %>)
+    </a>
+    <% if (typeof folders !== 'undefined' && folders) { folders.forEach(f => { %>
+      <a href="/videos?folder=<%= f.id %>" class="folder-chip <%= (typeof currentFolder !== 'undefined' && currentFolder && currentFolder.id === f.id) ? 'active' : '' %>">
+        📁 <%= f.name %> (<%= f.video_count %>)
+      </a>
+    <% }); } %>
+    <button type="button" class="folder-chip folder-chip-add" data-open-modal="new-folder">+ Folder</button>
+  </div>
+  <% if (typeof currentFolder !== 'undefined' && currentFolder) { %>
+    <div class="folder-actions">
+      <% const uploadedCount = videos.filter(v => v.status === 'uploaded').length; %>
+      <% const readyCount = videos.filter(v => v.status === 'ready').length; %>
+      <% if (readyCount > 0) { %>
+        <form method="POST" action="/videos/folders/<%= currentFolder.id %>/create-playlist" class="inline"
+              data-confirm="Buat playlist baru '<%= currentFolder.name %>' dari <%= readyCount %> video ready di folder ini?"
+              data-confirm-title="Create playlist"
+              data-confirm-action="Buat">
+          <button type="submit" class="btn btn-sm btn-primary" title="Create playlist from this folder">▶ Create playlist</button>
+        </form>
+      <% } %>
+      <% if (uploadedCount > 0) { %>
+        <button type="button" class="btn btn-sm" data-open-modal="bulk-prepare" title="Prepare all uploaded videos in this folder">⚙ Prepare all (<%= uploadedCount %>)</button>
+      <% } %>
+      <button type="button" class="btn btn-sm" data-open-modal="rename-folder">Rename</button>
+      <form method="POST" action="/videos/folders/<%= currentFolder.id %>/delete" class="inline"
+            data-confirm="Hapus folder '<%= currentFolder.name %>'? Video di dalamnya tidak akan dihapus, hanya dipindah ke unfiled."
+            data-confirm-title="Hapus folder"
+            data-confirm-action="Hapus">
+        <button type="submit" class="btn btn-sm btn-danger">Delete folder</button>
+      </form>
+    </div>
+  <% } %>
+</div>
 
 <% if (videos.length === 0) { %>
   <div class="card empty">
@@ -16,21 +54,52 @@
   </div>
 <% } else { %>
   <div class="table-wrap card card-flush">
-    <table class="table">
+    <table class="table videos-table">
       <thead><tr>
+        <th class="col-w-thumb"></th>
         <th class="col-w-title">Title</th>
-        <th class="col-w-file">File</th>
-        <th class="col-w-size">Size</th>
         <th class="col-w-status">Status</th>
-        <th class="col-w-date">Uploaded</th>
         <th class="col-w-actions">Actions</th>
       </tr></thead>
       <tbody>
         <% videos.forEach(v => { %>
           <tr>
-            <td class="clamp-2" title="<%= v.title %>"><%= v.title %></td>
-            <td class="mono truncate" title="<%= v.filename %>"><%= v.filename %></td>
-            <td class="col-size"><%= (v.size_bytes / (1024*1024)).toFixed(1) %> MB</td>
+            <td class="col-thumb">
+              <% if (v.thumbnail) { %>
+                <button type="button" class="video-thumb-btn"
+                        data-open-modal="video-preview"
+                        data-video-src="/uploads/<%= v.filename %>"
+                        data-video-title="<%= v.title %>"
+                        data-video-info="<%= v.src_width && v.src_height ? v.src_width + '×' + v.src_height : '' %><%= v.size_bytes ? ' · ' + (v.size_bytes / (1024*1024)).toFixed(1) + ' MB' : '' %><%= v.duration_seconds ? ' · ' + Math.floor(v.duration_seconds/60) + 'm ' + Math.floor(v.duration_seconds%60) + 's' : '' %>"
+                        title="Preview video">
+                  <img src="/uploads/thumbs/<%= v.thumbnail %>" alt="" class="video-thumb" loading="lazy">
+                  <span class="video-thumb-play">▶</span>
+                </button>
+              <% } else { %>
+                <form method="POST" action="/videos/<%= v.id %>/regen-thumb" class="inline" title="Generate thumbnail">
+                  <button type="submit" class="video-thumb video-thumb-empty">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="14" height="14" rx="2"/><path d="M22 7l-6 5 6 5V7z"/></svg>
+                  </button>
+                </form>
+              <% } %>
+            </td>
+            <td class="video-title-cell">
+              <div class="video-title" title="<%= v.title %>"><%= v.title %></div>
+              <div class="video-meta small muted">
+                <%= (v.size_bytes / (1024*1024)).toFixed(1) %> MB
+                · <%= formatTime(v.created_at) %>
+                <% if (v.duration_seconds) { %>
+                  <% const dur = Math.round(v.duration_seconds); %>
+                  <% const h = Math.floor(dur / 3600); %>
+                  <% const m = Math.floor((dur % 3600) / 60); %>
+                  <% const s = dur % 60; %>
+                  · <%= h > 0 ? h + 'h ' + m + 'm' : m + 'm ' + s + 's' %>
+                <% } %>
+                <% if (v.src_width && v.src_height) { %>
+                  · <%= v.src_width %>×<%= v.src_height %>
+                <% } %>
+              </div>
+            </td>
             <td>
               <% if (v.status === 'ready') { %>
                 <span class="badge badge-running">ready</span>
@@ -58,7 +127,6 @@
                 <span class="badge badge-idle"><%= v.status %></span>
               <% } %>
             </td>
-            <td class="col-date small muted"><%= formatTime(v.created_at) %></td>
             <td class="actions">
               <% if (v.status === 'transcoding') { %>
                 <button type="button" class="btn btn-link"
@@ -75,7 +143,7 @@
                         data-src-fps="<%= v.src_fps || '' %>"
                         title="Re-encode dengan preset lain">Re-Prepare</button>
               <% } else { %>
-                <button type="button" class="btn btn-primary"
+                <button type="button" class="btn btn-primary btn-sm"
                         data-open-modal="prepare"
                         data-video-id="<%= v.id %>"
                         data-video-title="<%= v.title %>"
@@ -85,11 +153,21 @@
                   <%= v.status === 'error' ? 'Retry Prepare' : 'Prepare' %>
                 </button>
               <% } %>
+              <button type="button" class="btn-icon"
+                      data-open-modal="edit-video"
+                      data-video-id="<%= v.id %>"
+                      data-video-title="<%= v.title %>"
+                      data-folder-id="<%= v.folder_id || '' %>"
+                      title="Edit">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+              </button>
               <form method="POST" action="/videos/<%= v.id %>/delete" class="inline"
                     data-confirm="Hapus video '<%= v.title %>'? File di disk akan ikut terhapus."
                     data-confirm-title="Hapus video"
                     data-confirm-action="Hapus">
-                <button class="btn btn-danger" type="submit">Delete</button>
+                <button class="btn-icon btn-icon-danger" type="submit" title="Delete">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+                </button>
               </form>
             </td>
           </tr>
@@ -97,6 +175,46 @@
       </tbody>
     </table>
   </div>
+
+  <% if (typeof totalPages !== 'undefined' && totalPages > 1) {
+       const baseUrl = '/videos?' + (typeof currentFolder !== 'undefined' && currentFolder ? 'folder=' + currentFolder.id + '&' : '');
+       const pageUrl = (n) => baseUrl + 'page=' + n;
+       // Build page numbers with ellipsis: 1 ... 4 5 [6] 7 8 ... 20
+       const windowSize = 2;
+       const pages = [];
+       for (let i = 1; i <= totalPages; i++) {
+         if (i === 1 || i === totalPages || (i >= page - windowSize && i <= page + windowSize)) {
+           pages.push(i);
+         } else if (pages[pages.length - 1] !== '...') {
+           pages.push('...');
+         }
+       }
+  %>
+    <div class="pagination">
+      <span class="small muted">Showing <%= (page - 1) * perPage + 1 %>–<%= Math.min(page * perPage, totalCount) %> of <%= totalCount %></span>
+      <div class="pagination-buttons">
+        <% if (page > 1) { %>
+          <a href="<%= pageUrl(page - 1) %>" class="btn btn-sm">← Prev</a>
+        <% } else { %>
+          <span class="btn btn-sm btn-disabled">← Prev</span>
+        <% } %>
+        <% pages.forEach(p => { %>
+          <% if (p === '...') { %>
+            <span class="page-ellipsis">…</span>
+          <% } else if (p === page) { %>
+            <span class="btn btn-sm btn-primary btn-disabled"><%= p %></span>
+          <% } else { %>
+            <a href="<%= pageUrl(p) %>" class="btn btn-sm"><%= p %></a>
+          <% } %>
+        <% }); %>
+        <% if (page < totalPages) { %>
+          <a href="<%= pageUrl(page + 1) %>" class="btn btn-sm">Next →</a>
+        <% } else { %>
+          <span class="btn btn-sm btn-disabled">Next →</span>
+        <% } %>
+      </div>
+    </div>
+  <% } %>
 <% } %>
 
 <dialog id="upload" class="modal">
@@ -114,6 +232,19 @@
         <div class="modal-body">
           <label>Title <input name="title" placeholder="(optional, pakai nama file kalau kosong)"></label>
           <label>File <input type="file" name="video" accept="video/*" required></label>
+          <% if (typeof currentFolder !== 'undefined' && currentFolder) { %>
+            <input type="hidden" name="folder_id" value="<%= currentFolder.id %>">
+            <p class="muted small">Upload ke folder: <strong><%= currentFolder.name %></strong></p>
+          <% } else if (typeof folders !== 'undefined' && folders.length > 0) { %>
+            <label>Folder (optional)
+              <select name="folder_id">
+                <option value="">(No folder)</option>
+                <% folders.forEach(f => { %>
+                  <option value="<%= f.id %>"><%= f.name %></option>
+                <% }) %>
+              </select>
+            </label>
+          <% } %>
           <p class="muted small">
             Allowed formats: mp4, mkv, mov, flv, ts, webm. Max 5 GB.
           </p>
@@ -319,7 +450,7 @@ document.addEventListener('modal:before-open', (e) => {
   }
 });
 
-// Upload with progress bar (unchanged).
+// Upload with XHR (simple, reliable).
 (function () {
   // Tab switching for upload modal.
   const tabs = document.querySelectorAll('.modal-tabs .tab');
@@ -351,19 +482,23 @@ document.addEventListener('modal:before-open', (e) => {
   }
 
   let xhr = null;
+
   form.addEventListener('submit', (e) => {
     e.preventDefault();
     const fileInput = form.querySelector('input[type=file]');
     if (!fileInput.files || fileInput.files.length === 0) return;
+
     const data = new FormData(form);
     xhr = new XMLHttpRequest();
     xhr.open('POST', form.action);
+
     progress.style.display = 'block';
     bar.style.width = '0%';
     label.textContent = 'preparing…';
     submitBtn.disabled = true;
     submitBtn.textContent = 'Uploading…';
     cancelBtn.textContent = 'Batalkan upload';
+
     const started = Date.now();
     xhr.upload.onprogress = (ev) => {
       if (!ev.lengthComputable) return;
@@ -373,31 +508,40 @@ document.addEventListener('modal:before-open', (e) => {
       const speed = ev.loaded / Math.max(1, elapsed);
       label.textContent = [pct + '%', fmtBytes(ev.loaded) + ' / ' + fmtBytes(ev.total), fmtBytes(speed) + '/s'].join(' · ');
     };
+
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 400) {
         label.textContent = 'done, reloading…';
-        // Explicitly close the dialog before navigation so browsers don't
-        // try to restore the "open" state when the new page loads.
         try { dlg.close(); } catch (_) {}
-        window.location.href = xhr.responseURL || '/videos';
+        // Force reload to see the new video in the list.
+        window.location.href = '/videos';
       } else {
         label.textContent = 'upload failed (' + xhr.status + ')';
         submitBtn.disabled = false; submitBtn.textContent = 'Upload'; cancelBtn.textContent = 'Batal';
       }
     };
-    xhr.onerror = () => { label.textContent = 'network error, coba lagi'; submitBtn.disabled = false; submitBtn.textContent = 'Upload'; cancelBtn.textContent = 'Batal'; };
-    xhr.onabort = () => { label.textContent = 'upload dibatalkan'; bar.style.width = '0%'; submitBtn.disabled = false; submitBtn.textContent = 'Upload'; cancelBtn.textContent = 'Batal'; };
+    xhr.onerror = () => {
+      label.textContent = 'network error, coba lagi';
+      submitBtn.disabled = false; submitBtn.textContent = 'Upload'; cancelBtn.textContent = 'Batal';
+    };
+    xhr.onabort = () => {
+      label.textContent = 'upload dibatalkan'; bar.style.width = '0%';
+      submitBtn.disabled = false; submitBtn.textContent = 'Upload'; cancelBtn.textContent = 'Batal';
+    };
     xhr.send(data);
   });
+
   cancelBtn.addEventListener('click', (e) => {
     if (xhr && xhr.readyState !== XMLHttpRequest.DONE) {
       e.preventDefault(); e.stopPropagation();
       xhr.abort(); xhr = null;
     }
   }, true);
+
   dlg.addEventListener('modal:before-open', () => {
     progress.style.display = 'none'; bar.style.width = '0%'; label.textContent = 'starting…';
     submitBtn.disabled = false; submitBtn.textContent = 'Upload'; cancelBtn.textContent = 'Batal';
+    xhr = null;
     form.reset();
   });
 })();
@@ -551,5 +695,172 @@ document.addEventListener('modal:before-open', (e) => {
 
   ids.forEach((id) => { pollOne(id); setInterval(() => pollOne(id), 3000); });
 })();
+</script>
+<dialog id="new-folder" class="modal modal-sm">
+  <div class="modal-card">
+    <header class="modal-header">
+      <h2>New folder</h2>
+      <button type="button" class="modal-close" data-close-modal aria-label="Close">×</button>
+    </header>
+    <form method="POST" action="/videos/folders/create">
+      <div class="modal-body">
+        <label>Folder name <input name="name" required placeholder="e.g. Lofi, Gaming, Tutorial"></label>
+      </div>
+      <footer class="modal-footer">
+        <button type="button" class="btn" data-close-modal>Batal</button>
+        <button type="submit" class="btn btn-primary">Create</button>
+      </footer>
+    </form>
+  </div>
+</dialog>
+
+<% if (typeof currentFolder !== 'undefined' && currentFolder) { %>
+<dialog id="rename-folder" class="modal modal-sm">
+  <div class="modal-card">
+    <header class="modal-header">
+      <h2>Rename folder</h2>
+      <button type="button" class="modal-close" data-close-modal aria-label="Close">×</button>
+    </header>
+    <form method="POST" action="/videos/folders/<%= currentFolder.id %>/rename">
+      <div class="modal-body">
+        <label>Name <input name="name" required value="<%= currentFolder.name %>"></label>
+      </div>
+      <footer class="modal-footer">
+        <button type="button" class="btn" data-close-modal>Batal</button>
+        <button type="submit" class="btn btn-primary">Rename</button>
+      </footer>
+    </form>
+  </div>
+</dialog>
+
+<dialog id="bulk-prepare" class="modal modal-sm">
+  <div class="modal-card">
+    <header class="modal-header">
+      <h2>Prepare all videos in this folder</h2>
+      <button type="button" class="modal-close" data-close-modal aria-label="Close">×</button>
+    </header>
+    <form method="POST" action="/videos/folders/<%= currentFolder.id %>/prepare-all">
+      <div class="modal-body">
+        <% const uploadedInFolder = videos.filter(v => v.status === 'uploaded').length; %>
+        <p class="muted small">Akan menjalankan transcode untuk <strong><%= uploadedInFolder %> video</strong> sekaligus. Proses berjalan paralel dan memakan CPU signifikan.</p>
+        <div class="grid-2">
+          <label>Resolution / FPS
+            <select name="preset">
+              <% Object.keys(presets).forEach(p => { %>
+                <option value="<%= p %>" <%= p === '1080p30' ? 'selected' : '' %>><%= p %></option>
+              <% }) %>
+            </select>
+          </label>
+          <label>x264 preset
+            <select name="x264_preset">
+              <option value="ultrafast">ultrafast</option>
+              <option value="superfast">superfast</option>
+              <option value="veryfast">veryfast</option>
+              <option value="faster">faster</option>
+              <option value="fast">fast</option>
+              <option value="medium" selected>medium</option>
+            </select>
+          </label>
+        </div>
+      </div>
+      <footer class="modal-footer">
+        <button type="button" class="btn" data-close-modal>Batal</button>
+        <button type="submit" class="btn btn-primary">Start Bulk Prepare</button>
+      </footer>
+    </form>
+  </div>
+</dialog>
+<% } %>
+
+<!-- Video preview player modal -->
+<dialog id="video-preview" class="modal modal-lg">
+  <div class="modal-card">
+    <header class="modal-header">
+      <h2 id="preview-title">Preview</h2>
+      <button type="button" class="modal-close" data-close-modal aria-label="Close">×</button>
+    </header>
+    <div class="modal-body" style="padding:0;background:#000;border-radius:0 0 12px 12px">
+      <video id="preview-player" controls preload="metadata" style="width:100%;max-height:70vh;display:block">
+        Your browser does not support the video tag.
+      </video>
+      <div id="preview-info" class="small muted" style="padding:0.6rem 1rem;background:var(--panel)"></div>
+      <div id="preview-error" class="alert alert-error" style="display:none;margin:1rem">
+        Format video ini tidak didukung browser. Jalankan <strong>Prepare</strong> dulu untuk convert ke H.264 MP4.
+      </div>
+    </div>
+  </div>
+</dialog>
+<script>
+(function() {
+  const dlg = document.getElementById('video-preview');
+  if (!dlg) return;
+  const player = document.getElementById('preview-player');
+  const titleEl = document.getElementById('preview-title');
+  const infoEl = document.getElementById('preview-info');
+  const errorEl = document.getElementById('preview-error');
+
+  document.addEventListener('modal:before-open', (e) => {
+    if (e.detail.id !== 'video-preview') return;
+    const btn = e.detail.trigger;
+    if (!btn) return;
+    const src = btn.dataset.videoSrc || '';
+    titleEl.textContent = btn.dataset.videoTitle || 'Preview';
+    infoEl.textContent = btn.dataset.videoInfo || '';
+    errorEl.style.display = 'none';
+    player.style.display = 'block';
+    player.src = src;
+    player.load();
+  });
+
+  player.addEventListener('error', () => {
+    player.style.display = 'none';
+    errorEl.style.display = 'block';
+  });
+
+  dlg.addEventListener('close', () => {
+    player.pause();
+    player.removeAttribute('src');
+    player.load(); // release memory
+  });
+})();
+</script>
+
+<dialog id="edit-video" class="modal modal-sm">
+  <div class="modal-card">
+    <header class="modal-header">
+      <h2>Edit video</h2>
+      <button type="button" class="modal-close" data-close-modal aria-label="Close">×</button>
+    </header>
+    <form method="POST" id="edit-video-form">
+      <div class="modal-body">
+        <label>Title <input name="title" id="edit-video-title" required></label>
+        <label>Folder
+          <select name="folder_id" id="edit-video-folder">
+            <option value="">(No folder)</option>
+            <% if (typeof folders !== 'undefined') { folders.forEach(f => { %>
+              <option value="<%= f.id %>"><%= f.name %></option>
+            <% }); } %>
+          </select>
+        </label>
+        <input type="hidden" name="back" value="/videos<%= typeof currentFolder !== 'undefined' && currentFolder ? '?folder=' + currentFolder.id : '' %>">
+      </div>
+      <footer class="modal-footer">
+        <button type="button" class="btn" data-close-modal>Batal</button>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </footer>
+    </form>
+  </div>
+</dialog>
+
+<script>
+// Populate edit-video modal with current data.
+document.addEventListener('modal:before-open', (e) => {
+  if (e.detail.id !== 'edit-video') return;
+  const btn = e.detail.trigger;
+  if (!btn || !btn.dataset.videoId) return;
+  document.getElementById('edit-video-form').action = '/videos/' + btn.dataset.videoId + '/edit';
+  document.getElementById('edit-video-title').value = btn.dataset.videoTitle || '';
+  document.getElementById('edit-video-folder').value = btn.dataset.folderId || '';
+});
 </script>
 <%- include('partials/footer') %>

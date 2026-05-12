@@ -16,28 +16,82 @@
   </div>
 <% } else { %>
   <div class="table-wrap card card-flush">
-    <table class="table">
+    <table class="table videos-table">
       <thead><tr>
+        <th class="col-w-thumb"></th>
         <th class="col-w-title">Name</th>
-        <th class="col-w-size">Videos</th>
-        <th class="col-w-status">Loop</th>
-        <th class="col-w-date">Created</th>
+        <th class="col-w-status">Settings</th>
         <th class="col-w-actions">Actions</th>
       </tr></thead>
       <tbody>
         <% playlists.forEach(p => { %>
           <tr>
-            <td class="truncate"><a href="/playlists/<%= p.id %>"><%= p.name %></a></td>
-            <td><%= p.item_count %></td>
-            <td><%= p.loop_playlist ? 'Yes' : 'No' %></td>
-            <td class="col-date small muted"><%= formatTime(p.created_at) %></td>
+            <td class="col-thumb">
+              <button type="button" class="playlist-thumb-link"
+                      data-open-modal="manage-playlist"
+                      data-playlist-id="<%= p.id %>"
+                      data-playlist-name="<%= p.name %>"
+                      style="border:none;padding:0;background:transparent;cursor:pointer">
+                <% if (p.thumbs && p.thumbs.length > 0) { %>
+                  <div class="video-thumb playlist-collage collage-<%= p.thumbs.length >= 4 ? '4' : p.thumbs.length %>">
+                    <% p.thumbs.slice(0, 4).forEach(t => { %>
+                      <img src="/uploads/thumbs/<%= t %>" alt="" loading="lazy">
+                    <% }) %>
+                  </div>
+                <% } else { %>
+                  <div class="video-thumb video-thumb-empty" style="cursor:pointer">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+                  </div>
+                <% } %>
+                <span class="playlist-card-count">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" style="margin-right:2px;vertical-align:-1px"><path d="M8 5v14l11-7z"/></svg><%= p.item_count %>
+                </span>
+              </button>
+            </td>
+            <td class="video-title-cell">
+              <button type="button" class="video-title playlist-name-btn"
+                      data-open-modal="manage-playlist"
+                      data-playlist-id="<%= p.id %>"
+                      data-playlist-name="<%= p.name %>"><%= p.name %></button>
+              <div class="video-meta small muted">
+                <%
+                  const dur = p.total_duration || 0;
+                  const dh = Math.floor(dur / 3600);
+                  const dm = Math.floor((dur % 3600) / 60);
+                %>
+                <% if (p.item_count === 0) { %>empty<% } else if (dh > 0) { %><%= dh %>h <%= dm %>m<% } else if (dm > 0) { %><%= dm %>m<% } else { %><%= Math.round(dur) %>s<% } %>
+                · Created <%= formatTime(p.created_at) %>
+              </div>
+            </td>
+            <td>
+              <% if (p.loop_playlist) { %><span class="badge badge-running" style="margin-right:4px">Loop</span><% } %>
+              <% if (p.shuffle) { %><span class="badge badge-idle">Shuffle</span><% } %>
+              <% if (!p.loop_playlist && !p.shuffle) { %><span class="muted small">Once, in order</span><% } %>
+            </td>
             <td class="actions">
-              <a href="/playlists/<%= p.id %>" class="btn btn-link">Edit</a>
+              <button type="button" class="btn-icon"
+                      data-open-modal="manage-playlist"
+                      data-playlist-id="<%= p.id %>"
+                      data-playlist-name="<%= p.name %>"
+                      title="Manage videos">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+              </button>
+              <button type="button" class="btn-icon"
+                      data-open-modal="edit-playlist"
+                      data-playlist-id="<%= p.id %>"
+                      data-playlist-name="<%= p.name %>"
+                      data-playlist-loop="<%= p.loop_playlist %>"
+                      data-playlist-shuffle="<%= p.shuffle %>"
+                      title="Edit settings">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+              </button>
               <form method="POST" action="/playlists/<%= p.id %>/delete" class="inline"
                     data-confirm="Hapus playlist '<%= p.name %>'?"
                     data-confirm-title="Hapus playlist"
                     data-confirm-action="Hapus">
-                <button class="btn btn-danger" type="submit">Delete</button>
+                <button class="btn-icon btn-icon-danger" type="submit" title="Delete">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+                </button>
               </form>
             </td>
           </tr>
@@ -47,25 +101,282 @@
   </div>
 <% } %>
 
-<dialog id="new-playlist" class="modal modal-sm">
+<!-- New playlist modal — with multi-video picker -->
+<dialog id="new-playlist" class="modal modal-lg">
   <div class="modal-card">
     <header class="modal-header">
       <h2>New playlist</h2>
       <button type="button" class="modal-close" data-close-modal aria-label="Close">×</button>
     </header>
-    <form method="POST" action="/playlists">
+    <form method="POST" action="/playlists" id="new-playlist-form">
       <div class="modal-body">
         <label>Name <input name="name" required placeholder="My 24/7 playlist"></label>
-        <label class="inline-check">
-          <input type="checkbox" name="loop_playlist" value="1" checked>
-          Loop (setelah video terakhir, mulai dari awal)
-        </label>
+        <div style="display:flex;gap:1.5rem;margin:0.5rem 0 0.75rem">
+          <label class="inline-check">
+            <input type="checkbox" name="loop_playlist" value="1" checked>
+            Loop
+          </label>
+          <label class="inline-check">
+            <input type="checkbox" name="shuffle" value="1">
+            Shuffle
+          </label>
+        </div>
+
+        <% if (videos.length === 0) { %>
+          <p class="muted small">Belum ada video ready. Playlist akan dibuat kosong, video bisa ditambah nanti.</p>
+        <% } else { %>
+          <div class="video-picker-header">
+            <span class="small muted">Pilih video untuk dimasukkan (<span id="picker-count">0</span>/<%= videos.length %>)</span>
+            <div>
+              <button type="button" class="btn-link btn-sm" id="picker-select-all">Select all</button>
+              <button type="button" class="btn-link btn-sm" id="picker-clear">Clear</button>
+            </div>
+          </div>
+          <input type="text" id="picker-search" placeholder="🔍 Search videos..." style="width:100%;margin-bottom:0.4rem;padding:0.4rem 0.6rem;font-size:0.85rem">
+          <div class="video-picker">
+            <% videos.forEach(v => { %>
+              <label class="video-picker-item">
+                <input type="checkbox" name="video_ids" value="<%= v.id %>" class="video-picker-check">
+                <% if (v.thumbnail) { %>
+                  <img src="/uploads/thumbs/<%= v.thumbnail %>" alt="" loading="lazy">
+                <% } else { %>
+                  <div class="video-picker-thumb-empty">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="14" height="14" rx="2"/><path d="M22 7l-6 5 6 5V7z"/></svg>
+                  </div>
+                <% } %>
+                <div class="video-picker-info">
+                  <div class="video-picker-title"><%= v.title %></div>
+                  <div class="video-picker-meta small muted">
+                    <%= (v.size_bytes / (1024*1024)).toFixed(0) %>MB<% if (v.duration_seconds) { %>
+                      · <% const m = Math.floor(v.duration_seconds/60); const s = Math.floor(v.duration_seconds%60); %><%= m %>:<%= String(s).padStart(2,'0') %>
+                    <% } %>
+                  </div>
+                </div>
+              </label>
+            <% }) %>
+          </div>
+        <% } %>
       </div>
       <footer class="modal-footer">
         <button type="button" class="btn" data-close-modal>Batal</button>
-        <button type="submit" class="btn btn-primary">Simpan</button>
+        <button type="submit" class="btn btn-primary">Create playlist</button>
       </footer>
     </form>
   </div>
 </dialog>
+
+<!-- Manage playlist modal — add/remove videos with AJAX -->
+<dialog id="manage-playlist" class="modal modal-lg">
+  <div class="modal-card">
+    <header class="modal-header">
+      <h2>Manage: <span id="manage-pl-name">…</span></h2>
+      <button type="button" class="modal-close" data-close-modal aria-label="Close">×</button>
+    </header>
+    <div class="modal-body">
+      <div class="video-picker-header">
+        <span class="small muted"><span id="manage-picker-count">0</span> selected</span>
+        <div>
+          <button type="button" class="btn-link btn-sm" id="manage-select-all">Select all</button>
+          <button type="button" class="btn-link btn-sm" id="manage-clear">Clear</button>
+        </div>
+      </div>
+      <div class="video-picker" id="manage-picker-list">
+        <p class="muted small" style="padding:1rem;text-align:center">Loading…</p>
+      </div>
+    </div>
+    <footer class="modal-footer">
+      <button type="button" class="btn" data-close-modal>Batal</button>
+      <button type="button" class="btn btn-primary" id="manage-save-btn">Save changes</button>
+    </footer>
+  </div>
+</dialog>
+
+<!-- Edit playlist modal -->
+<dialog id="edit-playlist" class="modal modal-sm">
+  <div class="modal-card">
+    <header class="modal-header">
+      <h2>Edit playlist</h2>
+      <button type="button" class="modal-close" data-close-modal aria-label="Close">×</button>
+    </header>
+    <form method="POST" id="edit-playlist-form">
+      <div class="modal-body">
+        <label>Name <input name="name" id="edit-pl-name" required></label>
+        <label class="inline-check">
+          <input type="checkbox" name="loop_playlist" value="1" id="edit-pl-loop">
+          Loop
+        </label>
+        <label class="inline-check">
+          <input type="checkbox" name="shuffle" value="1" id="edit-pl-shuffle">
+          Shuffle
+        </label>
+      </div>
+      <footer class="modal-footer">
+        <button type="button" class="btn" data-close-modal>Batal</button>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </footer>
+    </form>
+  </div>
+</dialog>
+
+<script>
+// Edit playlist modal — populate.
+document.addEventListener('modal:before-open', (e) => {
+  if (e.detail.id !== 'edit-playlist') return;
+  const btn = e.detail.trigger;
+  if (!btn) return;
+  document.getElementById('edit-playlist-form').action = '/playlists/' + btn.dataset.playlistId + '/settings';
+  document.getElementById('edit-pl-name').value = btn.dataset.playlistName || '';
+  document.getElementById('edit-pl-loop').checked = btn.dataset.playlistLoop === '1';
+  document.getElementById('edit-pl-shuffle').checked = btn.dataset.playlistShuffle === '1';
+});
+
+// Video picker — select all / clear / count / search filter.
+(function() {
+  const checks = document.querySelectorAll('.video-picker-check');
+  if (checks.length === 0) return;
+  const countEl = document.getElementById('picker-count');
+  const selectAllBtn = document.getElementById('picker-select-all');
+  const clearBtn = document.getElementById('picker-clear');
+  const searchInput = document.getElementById('picker-search');
+  const items = document.querySelectorAll('.video-picker-item');
+
+  function updateCount() {
+    const n = document.querySelectorAll('.video-picker-check:checked').length;
+    if (countEl) countEl.textContent = n;
+  }
+  checks.forEach(c => c.addEventListener('change', updateCount));
+  if (selectAllBtn) selectAllBtn.addEventListener('click', () => {
+    // Only select visible (not filtered out) items.
+    items.forEach(item => {
+      if (item.style.display !== 'none') {
+        item.querySelector('input[type="checkbox"]').checked = true;
+      }
+    });
+    updateCount();
+  });
+  if (clearBtn) clearBtn.addEventListener('click', () => { checks.forEach(c => c.checked = false); updateCount(); });
+  updateCount();
+
+  // Search filter — instant client-side filter by title.
+  if (searchInput) {
+    searchInput.addEventListener('input', () => {
+      const q = searchInput.value.toLowerCase().trim();
+      items.forEach(item => {
+        const title = (item.querySelector('.video-picker-title') || {}).textContent || '';
+        item.style.display = !q || title.toLowerCase().includes(q) ? '' : 'none';
+      });
+    });
+  }
+})();
+
+// --- Manage playlist modal (AJAX) ---
+(function() {
+  const dlg = document.getElementById('manage-playlist');
+  if (!dlg) return;
+  const nameEl = document.getElementById('manage-pl-name');
+  const listEl = document.getElementById('manage-picker-list');
+  const countEl = document.getElementById('manage-picker-count');
+  const selectAllBtn = document.getElementById('manage-select-all');
+  const clearBtn = document.getElementById('manage-clear');
+  const saveBtn = document.getElementById('manage-save-btn');
+  let currentPlaylistId = null;
+
+  function updateCount() {
+    const n = listEl.querySelectorAll('.manage-check:checked').length;
+    countEl.textContent = n;
+  }
+
+  function fmtMB(b) { return (b / (1024*1024)).toFixed(0) + 'MB'; }
+  function fmtDur(s) {
+    if (!s) return '';
+    const m = Math.floor(s / 60);
+    const sec = Math.floor(s % 60);
+    return m + ':' + String(sec).padStart(2, '0');
+  }
+
+  function renderItems(videos, itemIds) {
+    const selected = new Set(itemIds);
+    if (videos.length === 0) {
+      listEl.innerHTML = '<p class="muted small" style="padding:1rem;text-align:center">Belum ada video ready.</p>';
+      return;
+    }
+    listEl.innerHTML = videos.map(v => {
+      const checked = selected.has(v.id) ? 'checked' : '';
+      const thumb = v.thumbnail
+        ? '<img src="/uploads/thumbs/' + v.thumbnail + '" alt="" loading="lazy">'
+        : '<div class="video-picker-thumb-empty"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="14" height="14" rx="2"/><path d="M22 7l-6 5 6 5V7z"/></svg></div>';
+      const meta = fmtMB(v.size_bytes) + (v.duration_seconds ? ' · ' + fmtDur(v.duration_seconds) : '');
+      return '<label class="video-picker-item">' +
+        '<input type="checkbox" class="manage-check" value="' + v.id + '" ' + checked + '>' +
+        thumb +
+        '<div class="video-picker-info">' +
+          '<div class="video-picker-title">' + escapeHtml(v.title) + '</div>' +
+          '<div class="video-picker-meta small muted">' + meta + '</div>' +
+        '</div>' +
+      '</label>';
+    }).join('');
+    listEl.querySelectorAll('.manage-check').forEach(c =>
+      c.addEventListener('change', updateCount));
+    updateCount();
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, ch => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[ch]);
+  }
+
+  document.addEventListener('modal:before-open', async (e) => {
+    if (e.detail.id !== 'manage-playlist') return;
+    const btn = e.detail.trigger;
+    if (!btn) return;
+    currentPlaylistId = btn.dataset.playlistId;
+    nameEl.textContent = btn.dataset.playlistName || '';
+    listEl.innerHTML = '<p class="muted small" style="padding:1rem;text-align:center">Loading…</p>';
+    countEl.textContent = '0';
+    try {
+      const r = await fetch('/playlists/' + currentPlaylistId + '/state.json', { cache: 'no-store' });
+      if (!r.ok) throw new Error('Failed to load playlist state');
+      const data = await r.json();
+      renderItems(data.videos, data.itemIds);
+    } catch (err) {
+      listEl.innerHTML = '<p class="alert alert-error" style="margin:1rem">' + err.message + '</p>';
+    }
+  });
+
+  selectAllBtn.addEventListener('click', () => {
+    listEl.querySelectorAll('.manage-check').forEach(c => c.checked = true);
+    updateCount();
+  });
+  clearBtn.addEventListener('click', () => {
+    listEl.querySelectorAll('.manage-check').forEach(c => c.checked = false);
+    updateCount();
+  });
+
+  saveBtn.addEventListener('click', async () => {
+    if (!currentPlaylistId) return;
+    const videoIds = Array.from(listEl.querySelectorAll('.manage-check:checked'))
+      .map(c => Number(c.value));
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving…';
+    try {
+      const r = await fetch('/playlists/' + currentPlaylistId + '/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ video_ids: videoIds }),
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        throw new Error(err.error || 'Save failed');
+      }
+      // Reload page to reflect new counts / thumbnails.
+      window.location.href = '/playlists?notice=Playlist+updated';
+    } catch (err) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save changes';
+      alert('Error: ' + err.message);
+    }
+  });
+})();
+</script>
 <%- include('partials/footer') %>

@@ -7,17 +7,25 @@ Instruksi ringkas untuk AI coding agents yang melanjutkan project ini. Ini adala
 AwanStream adalah web app untuk **live streaming pre-recorded video ke platform RTMP** (YouTube Live, Facebook Live, Twitch, custom). Terinspirasi [bangtutorial/streamflow](https://github.com/bangtutorial/streamflow), tapi versi simple. Self-hosted, single-admin.
 
 Fitur utama:
+- **Video Library** dengan pagination (20/page), folder organizer, thumbnail 1280×720 auto-generate, edit title + folder via modal
 - Upload video dari PC (XHR progress bar) atau **import dari URL** (Google Drive, Mega, MediaFire, direct link)
 - Auto-suffix duplicate titles (`Video (2)`, `Video (3)`, ...)
 - **Prepare** — transcode sekali ke stream-ready (H.264 + AAC + GOP 2 detik) dengan **progress bar live + ETA**
   - Presets: 720p30, 720p60, 1080p30, 1080p60 + pilihan x264 preset
   - Auto-detect source resolution, live note tentang preset compatibility
+  - Bulk prepare per folder
 - **Job detail modal** — progress + FFmpeg log inline, ETA
-- **Playlist management** — create, add/remove/reorder videos
+- **Playlist management** — create dengan multi-select video picker, Manage modal (AJAX add/remove), Shuffle mode, Collage thumbnail 2×2
 - **Stream — Single Video** (Copy mode enforced, codec validation sebelum start)
-- **Stream — Playlist** (sequential auto-advance, loop playlist)
+- **Stream — Playlist** (sequential / shuffle auto-advance, loop playlist)
+- **Stream actions** sepenuhnya icon-based: Start, Stop, Edit (modal), Log (modal dengan auto-refresh), Delete
+- **Stream key show/hide toggle** (icon mata) untuk keamanan UX
+- **Auto-Retry + Health Check** — FFmpeg crash retry 5x dengan exponential backoff, stale stream (no output 5 menit) auto-kill
 - **Scheduled streaming** — auto-start / auto-stop berdasarkan tabel `schedules`, timezone-aware
+- **Stream History** — riwayat sesi streaming yang sudah selesai, minimum 10 detik
+- **Stream Duration Timer** — live counter 🔴 2h 15m 30s, update per detik
 - **System monitor** real-time (CPU/RAM/Uptime polling setiap 3 detik)
+- **HTTP Request Logger** (morgan) — format NestJS-style dengan warna
 - **Sidebar layout** dengan sub-menus (Videos: Library + Playlists, Streams: Single Video + Playlist)
 - **Modal dialogs** (native `<dialog>`) untuk semua form
 - **Custom confirm modal** (menggantikan native `confirm()`)
@@ -32,65 +40,110 @@ Fitur utama:
 - SQLite via `better-sqlite3` (sync API)
 - `express-session` + `connect-sqlite3` untuk session
 - `multer` untuk upload
+- `morgan` untuk HTTP request logging (NestJS-style custom format)
 - `bcryptjs` untuk password hash
 - `axios` untuk HTTP download (Google Drive, MediaFire, direct URL)
 - `megajs` untuk Mega.nz download
 - **FFmpeg + ffprobe** (dari system `$PATH`) untuk transcode, RTMP push, codec validation, dan media probe
 - Child process spawn per stream / per transcode job — **bukan** queue terpusat
 - `setInterval` 15 detik di main process untuk scheduler (no external cron)
+- `setInterval` 30 detik untuk health check stream (detect stale)
 
 ## Struktur file penting
 
 ```
 app.js                 Entry Express; mounts routes, configures session,
+                       morgan HTTP logger (NestJS-style custom format),
                        menyediakan helper formatTime via app.locals,
                        start scheduler polling loop, /api/system endpoint.
 src/db.js              SQLite schema + lightweight ALTER TABLE migrations.
-                       Tabel: users, videos, streams, schedules, playlists, playlist_items.
+                       Tabel: users, videos, streams, schedules, playlists,
+                       playlist_items, stream_history, folders.
 src/auth.js            requireAuth middleware + injectUser locals.
 src/streamManager.js   FFmpeg manager untuk live streaming (Map streamId → proc).
                        Redacts stream key di semua tulisan log.
-                       Playlist auto-advance (advancePlaylist) saat video selesai.
+                       Playlist auto-advance (advancePlaylist) — sequential atau
+                       shuffle. Auto-retry dengan exponential backoff (max 5x).
+                       Health check 30 detik (stale stream detection).
+                       saveHistory() ke tabel stream_history saat stop/error.
 src/transcoder.js      FFmpeg manager untuk "Prepare" (one-shot transcode).
                        Overwrites source file after success. Exposes progress
                        via getProgress() + probeDuration() + probeVideoInfo() +
-                       validateCodec() (ffprobe sync).
+                       validateCodec() (ffprobe sync, dengan timeout 30s).
+                       generateThumbnail(): extract frame 10% → 1280×720 JPEG.
 src/downloader.js      URL import module (Google Drive, Mega, MediaFire, direct).
                        Pattern mirrors transcoder.js (Map jobs, progress).
                        reconcileOnBoot() resets stale 'downloading' rows.
 src/scheduler.js       setInterval(tick, 15s) auto-start / auto-stop streams
                        berdasarkan row schedules. No in-memory state.
+src/chunkUpload.js     (Currently disabled at client-side, backend endpoints still
+                       exist.) Chunked upload manager untuk file > 50MB — session
+                       state, chunk storage di public/uploads/chunks/, merge saat
+                       finalize, auto-cleanup stale 24 jam.
 src/routes/auth.js     /login /logout
-src/routes/videos.js   /videos (CRUD) + /videos/:id/{prepare,progress,status}
+src/routes/videos.js   /videos dengan pagination (page, folder filter)
+                       + /videos/:id/{prepare,progress,status,edit,
+                         regen-thumb,move-folder,cancel-prepare,delete}
                        + /videos/upload (XHR) + /videos/import-url
                        + /videos/download/:jobId/progress
+                       + /videos/folders/{create,:id/rename,:id/delete,
+                         :id/prepare-all,:id/create-playlist,:id/delete-videos}
+                       + /videos/chunked/{init, :id/status, :id/:chunkIndex (PUT),
+                         :id/finalize, :id (DELETE)}
 src/routes/streams.js  /streams/single + /streams/playlist (split views)
-                       + /streams/:id/{start,stop,log,delete}
+                       + /streams/:id/{start,stop,log,edit,delete}
                        Codec validation sebelum start (Copy mode).
-src/routes/playlists.js /playlists (CRUD) + /:id/{add-video,remove-item,move-up,move-down}
+                       PRESETS: { key: { label, url } } — YouTube, Facebook,
+                       Twitch, Custom dengan display label capitalized.
+src/routes/playlists.js /playlists (CRUD dengan video_ids[] multi-select pada create)
+                       + /:id/{add-video,remove-item,move-up,move-down,settings,delete}
+                       + /:id/state.json (GET) + /:id/sync (POST — add/remove diff)
+src/routes/history.js  /history (list + delete + clear all)
 src/routes/schedules.js /schedules (CRUD) — datetime-local input → UTC ISO DB
 views/                 EJS templates, partials di views/partials/
   videos.ejs           Library + upload/import modal + inline polling script
-  streams-single.ejs   Single video stream management
-  streams-playlist.ejs Playlist stream management
-  playlists.ejs        Playlist list + create modal
-  playlist-detail.ejs  Playlist items (add/remove/reorder)
-  dashboard.ejs        Stats + system monitor + recent streams
+                       + folder filter bar + edit-video modal + pagination
+                       + thumbnail 160×90, bulk actions dalam folder
+  streams-single.ejs   Single video stream management (icon-only actions)
+                       + edit-stream modal + stream-log modal (auto-refresh 3s)
+  streams-playlist.ejs Playlist stream management (icon-only actions)
+                       + edit-stream-pl modal + stream-log modal
+  playlists.ejs        Playlist list dengan collage thumbnail 2×2
+                       + new-playlist modal (multi-video picker)
+                       + manage-playlist modal (AJAX sync add/remove)
+                       + edit-playlist modal (settings)
+  playlist-detail.ejs  Playlist items dengan thumbnail + reorder (↑↓)
+                       + settings modal (loop/shuffle/rename)
+  history.ejs          Stream history tabel + delete/clear
+  dashboard.ejs        Stats + system monitor + recent streams + timer
   schedules.ejs        Schedule management
-  partials/header.ejs  Sidebar nav + topbar + sub-menus
-  partials/footer.ejs  Toast root + confirm modal + close tags
+  partials/header.ejs  Sidebar nav + topbar + sub-menus + History link
+  partials/footer.ejs  Toast root + confirm modal + stream-key show/hide
+                       toggle global handler + close tags
   partials/flash.ejs   Toast notification renderer
 scripts/
   smoke.js             Load-test semua module + jalankan ensureSchema
   test-codec.js        Standalone codec validation test
+  generate-thumbs.js   Bulk generate thumbnail untuk video existing
+                       (--force untuk regenerate semua)
   ensure-tz-env.js     One-shot: tambahkan TZ & TZ_LABEL ke .env existing
   fix-video-status.js  One-shot: reset status 'ready' → 'uploaded' (legacy fix)
   render-check.js      Verify EJS templates render tanpa error
   test-tz.js           Sanity check parseLocalToUTC (5 case)
-public/css/app.css     Single CSS file, dark theme, sidebar, modals, toast, progress bar
+public/css/app.css     Single CSS file, dark theme, sidebar, modals, toast,
+                       progress bar, folder bar chips, playlist collage,
+                       video picker, btn-icon variants, input-with-toggle.
 public/uploads/        Tempat semua video (original & prepared — timpa original)
+public/uploads/thumbs/ Generated thumbnails (thumb_<id>.jpg)
+public/uploads/chunks/ Temporary chunk storage (gitignored)
 db/                    SQLite files (gitignored)
 logs/                  stream-<id>.log + transcode-<id>.log (gitignored)
+docs/
+  features.md          Per-feature reference (user-facing + technical)
+  architecture.md      Diagram request flow & state machines
+  codebase.md          Detail tiap file
+  services.md          API reference modul backend
+  deployment.md        systemd / pm2 / docker + reverse proxy
 ```
 
 ## Cara menjalankan
@@ -177,13 +230,19 @@ Lihat `docs/deployment.md` section "WSL (Ubuntu 24.04) development notes" untuk 
 Urut dari yang paling feasible:
 1. **Multi-platform broadcast** — satu source → beberapa RTMP target via FFmpeg `tee` muxer.
 2. **Real-time status via WebSocket/SSE** — push update bukan polling.
-3. **Docker support** — Dockerfile + docker-compose.yml (mirip StreamFlow asli).
-4. **Recurring schedules** — daily/weekly repeat via cron-like pattern.
-5. **Video thumbnail generation** — extract frame via ffmpeg untuk preview di library.
+3. **Recurring schedules** — daily/weekly repeat via cron-like pattern.
+4. **Audio overlay** — background music terpisah di playlist mode (lofi-style 24/7 streams).
+5. **App settings page** — ubah timezone, label, dll dari UI (bukan edit .env + restart).
+6. **Bulk upload** — multi-file picker, upload banyak video sekaligus.
+7. **Drag & drop reorder** — untuk playlist items, replace tombol ↑↓.
+8. **Video preview player** — klik thumbnail → mini HTML5 video player.
+9. **Disk usage warning** — alert di dashboard kalau disk > 85%.
+10. **Re-enable chunked upload** — backend sudah ada (`src/chunkUpload.js`), tinggal wire ke client dengan logic resume yang robust.
 
 ## Lihat juga
 
 - `README.md` — user-facing quick start & troubleshooting
+- `docs/features.md` — **referensi per-fitur** (user-facing + technical)
 - `docs/architecture.md` — diagram request flow & data model
 - `docs/codebase.md` — detail tiap file
 - `docs/services.md` — API reference modul backend (streamManager, transcoder, downloader, auth, db)
