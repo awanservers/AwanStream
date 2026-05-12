@@ -323,28 +323,24 @@
 
   refreshBtn.addEventListener('click', fetchLog);
 
-  copyBtn.addEventListener('click', async () => {
+  copyBtn.addEventListener('click', () => {
     const text = contentEl.textContent || '';
     if (!text || text === '(log empty)' || text === 'Loading…') return;
     const original = copyBtn.textContent;
-    try {
-      await navigator.clipboard.writeText(text);
-      copyBtn.textContent = '✓ Copied';
-    } catch (err) {
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      ta.style.position = 'fixed';
-      ta.style.opacity = '0';
-      document.body.appendChild(ta);
-      ta.select();
-      try {
-        document.execCommand('copy');
-        copyBtn.textContent = '✓ Copied';
-      } catch (e2) {
-        copyBtn.textContent = '✗ Failed';
-      }
-      document.body.removeChild(ta);
+    // Select text inside <pre> element and copy via Selection API (works on HTTP).
+    const range = document.createRange();
+    range.selectNodeContents(contentEl);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (_) {}
+    sel.removeAllRanges();
+    if (!ok) {
+      // Last resort: try Clipboard API (only works on HTTPS/localhost).
+      try { navigator.clipboard.writeText(text); ok = true; } catch (_) {}
     }
+    copyBtn.textContent = ok ? '✓ Copied' : '✗ Failed';
     setTimeout(() => { copyBtn.textContent = original; }, 1500);
   });
 })();

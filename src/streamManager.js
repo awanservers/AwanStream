@@ -427,7 +427,7 @@ function advancePlaylist(stream) {
 function tailLog(streamId, lines = 80) {
   const logPath = path.join(logsDir, `stream-${streamId}.log`);
   if (!fs.existsSync(logPath)) return '';
-  const data = fs.readFileSync(logPath, 'utf8').split('\n');
+  const data = fs.readFileSync(logPath, 'utf8').split(/\r\n|\n|\r/);
   let text = data.slice(-lines).join('\n');
   try {
     const s = db.prepare('SELECT stream_key FROM streams WHERE id=?').get(streamId);
