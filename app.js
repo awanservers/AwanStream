@@ -213,14 +213,36 @@ app.get('/', requireAuth, (req, res) => {
   });
 });
 
-// Real-time system stats endpoint (polling fallback + used by other views).
+// Real-time system stats — accurate CPU via /proc/stat delta (like htop).
+let prevCpuIdle = 0, prevCpuTotal = 0;
+function readCpuUsage() {
+  try {
+    const stat = fs.readFileSync('/proc/stat', 'utf8');
+    const line = stat.split('\n')[0]; // "cpu  user nice system idle iowait irq softirq steal"
+    const parts = line.trim().split(/\s+/).slice(1).map(Number);
+    const idle = parts[3] + (parts[4] || 0); // idle + iowait
+    const total = parts.reduce((a, b) => a + b, 0);
+    const diffIdle = idle - prevCpuIdle;
+    const diffTotal = total - prevCpuTotal;
+    prevCpuIdle = idle;
+    prevCpuTotal = total;
+    if (diffTotal === 0) return 0;
+    return Math.round(((diffTotal - diffIdle) / diffTotal) * 100);
+  } catch (_) {
+    // Fallback for non-Linux (e.g., macOS dev)
+    const os = require('os');
+    return Math.min(100, Math.round((os.loadavg()[0] / os.cpus().length) * 100));
+  }
+}
+// Prime the first sample so first real read has a delta.
+readCpuUsage();
+
 let lastNetSample = null;
 app.get('/api/system', requireAuth, (req, res) => {
   const os = require('os');
-  const cpus = os.cpus();
-  const cpuCount = cpus.length;
+  const cpuCount = os.cpus().length;
+  const cpuPercent = readCpuUsage();
   const loadAvg = os.loadavg();
-  const cpuPercent = Math.min(100, Math.round((loadAvg[0] / cpuCount) * 100));
   const totalMem = os.totalmem();
   const freeMem = os.freemem();
   const usedMem = totalMem - freeMem;
@@ -318,10 +340,9 @@ app.get('/api/events', (req, res) => {
 
   function getStats() {
     const os = require('os');
-    const cpus = os.cpus();
-    const cpuCount = cpus.length;
+    const cpuCount = os.cpus().length;
+    const cpuPercent = readCpuUsage();
     const loadAvg = os.loadavg();
-    const cpuPercent = Math.min(100, Math.round((loadAvg[0] / cpuCount) * 100));
     const totalMem = os.totalmem();
     const freeMem = os.freemem();
     const usedMem = totalMem - freeMem;
@@ -364,7 +385,7 @@ app.get('/api/events', (req, res) => {
 
   // Send immediately (first sample has no net delta yet — will populate on 2nd tick).
   send(getStats());
-  const interval = setInterval(() => send(getStats()), 3000);
+  const interval = setInterval(() => send(getStats()), 2000);
 
   // Heartbeat every 20s to keep alive through proxies.
   const heartbeat = setInterval(() => {

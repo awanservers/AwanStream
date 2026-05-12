@@ -656,9 +656,9 @@ dialog.modal.modal-lg { max-width: min(820px, 94vw); }
 .stat-icon-teal   { background: rgba(56, 189, 248, 0.15); color: #38bdf8; }
 
 .stat-body { flex: 1; min-width: 0; }
-.stat-num  { font-size: 1.75rem; font-weight: 700; line-height: 1.1; }
+.stat-num  { font-size: 1.75rem; font-weight: 700; line-height: 1.1; transition: opacity 0.3s ease; }
 .stat-label { font-size: 0.82rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 0.15rem; }
-.stat-sub  { font-size: 0.8rem; color: var(--muted); margin-top: 0.2rem; }
+.stat-sub  { font-size: 0.8rem; color: var(--muted); margin-top: 0.2rem; transition: opacity 0.3s ease; }
 
 .stat-live {
   position: absolute; top: 0.75rem; right: 0.85rem;
@@ -678,6 +678,60 @@ dialog.modal.modal-lg { max-width: min(820px, 94vw); }
 }
 @media (max-width: 480px) {
   .stat-grid { grid-template-columns: 1fr; }
+}
+
+/* Dashboard grid variants */
+.stat-grid-4 { grid-template-columns: repeat(4, 1fr); }
+.stat-grid-5 { grid-template-columns: repeat(5, 1fr); }
+
+/* Compact secondary cards */
+.stat-card-sm {
+  padding: 0.75rem 1rem;
+  border-radius: 10px;
+}
+.stat-card-sm .stat-body { gap: 0; }
+.stat-num-sm { font-size: 1.25rem; font-weight: 700; line-height: 1.2; transition: opacity 0.3s ease; }
+.stat-num-sub { font-size: 1rem; font-weight: 400; color: var(--muted); }
+
+/* Progress bar inside stat card */
+.stat-bar {
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  margin-top: 0.5rem;
+  overflow: hidden;
+}
+.stat-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.5s ease;
+}
+.stat-bar-blue  { background: var(--primary); }
+.stat-bar-green { background: var(--ok); }
+
+/* Network speed rows */
+.stat-net-row {
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.3rem;
+}
+.stat-net-val {
+  margin-left: auto;
+  font-weight: 600;
+  color: var(--ok);
+  transition: opacity 0.3s ease;
+}
+.net-arrow { color: var(--muted); font-weight: 700; }
+
+@media (max-width: 960px) {
+  .stat-grid-4 { grid-template-columns: repeat(2, 1fr); }
+  .stat-grid-5 { grid-template-columns: repeat(3, 1fr); }
+}
+@media (max-width: 480px) {
+  .stat-grid-4 { grid-template-columns: 1fr 1fr; }
+  .stat-grid-5 { grid-template-columns: 1fr 1fr; }
 }
 
 

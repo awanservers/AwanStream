@@ -5,139 +5,93 @@
   pageSubtitle: 'Ringkasan aktivitas streaming kamu.',
 }) %>
 
-<div class="stat-grid">
+<!-- Main 4 cards (real-time) -->
+<div class="stat-grid stat-grid-4">
 
-  <a href="/videos" class="stat-card">
-    <div class="stat-icon stat-icon-blue">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <rect x="2" y="5" width="14" height="14" rx="2"/><path d="M22 7l-6 5 6 5V7z"/>
-      </svg>
-    </div>
-    <div class="stat-body">
-      <div class="stat-num"><%= videoCount %></div>
-      <div class="stat-label">Videos</div>
-      <div class="stat-sub"><%= readyCount %> ready</div>
-    </div>
-  </a>
-
-  <a href="/streams" class="stat-card">
+  <div class="stat-card stat-card-plain">
     <div class="stat-icon stat-icon-purple">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M5 12a7 7 0 0 1 14 0"/><path d="M2 12a10 10 0 0 1 20 0"/><circle cx="12" cy="12" r="2"/>
       </svg>
     </div>
     <div class="stat-body">
-      <div class="stat-num"><%= streamCount %></div>
-      <div class="stat-label">Streams</div>
-      <div class="stat-sub"><%= runningCount > 0 ? runningCount + ' running' : 'none running' %></div>
+      <div class="stat-num" id="sys-streams"><%= runningCount %></div>
+      <div class="stat-label">Active Streams</div>
     </div>
-    <% if (runningCount > 0) { %>
-      <span class="stat-live">LIVE</span>
-    <% } %>
-  </a>
-
-  <a href="/schedules" class="stat-card">
-    <div class="stat-icon stat-icon-green">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <rect x="3" y="4" width="18" height="17" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>
-      </svg>
-    </div>
-    <div class="stat-body">
-      <div class="stat-num"><%= pendingSchedules %></div>
-      <div class="stat-label">Schedules</div>
-      <div class="stat-sub">
-        <% if (nextSchedule) { %>
-          next: <%= formatTime(nextSchedule.start_at) %>
-        <% } else { %>
-          no pending
-        <% } %>
-      </div>
-    </div>
-  </a>
-
-  <div class="stat-card stat-card-plain">
-    <div class="stat-icon stat-icon-orange">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3"/>
-      </svg>
-    </div>
-    <div class="stat-body">
-      <div class="stat-num">
-        <% const gb = totalBytes / (1024*1024*1024); %>
-        <% if (gb >= 1) { %><%= gb.toFixed(1) %> GB
-        <% } else { %><%= (totalBytes / (1024*1024)).toFixed(0) %> MB<% } %>
-      </div>
-      <div class="stat-label">Storage</div>
-      <div class="stat-sub"><%= videoCount %> file</div>
-    </div>
+    <% if (runningCount > 0) { %><span class="stat-live">LIVE</span><% } %>
   </div>
 
-</div>
-
-<h2 class="section-heading" style="margin-top:1.5rem">System</h2>
-<div class="stat-grid" style="grid-template-columns: repeat(5, 1fr)">
-  <div class="card stat-card stat-card-plain">
+  <div class="stat-card stat-card-plain">
     <div class="stat-icon stat-icon-blue">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h6v6H9z"/></svg>
     </div>
     <div class="stat-body">
       <div class="stat-num" id="sys-cpu"><%= system.cpuPercent %>%</div>
-      <div class="stat-label">CPU</div>
-      <div class="stat-sub" id="sys-cpu-sub"><%= system.cpuCount %> cores · load <%= system.loadAvg[0].toFixed(2) %></div>
+      <div class="stat-label">CPU Usage</div>
+      <div class="stat-bar"><div class="stat-bar-fill stat-bar-blue" id="sys-cpu-bar" style="width:<%= system.cpuPercent %>%"></div></div>
     </div>
   </div>
-  <div class="card stat-card stat-card-plain">
-    <div class="stat-icon stat-icon-purple">
+
+  <div class="stat-card stat-card-plain">
+    <div class="stat-icon stat-icon-green">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 20h20"/><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
     </div>
     <div class="stat-body">
-      <div class="stat-num" id="sys-mem"><%= system.memPercent %>%</div>
+      <div class="stat-num" id="sys-mem"><%= (system.usedMem / (1024*1024*1024)).toFixed(1) %> GB<span class="stat-num-sub" id="sys-mem-total"> / <%= (system.totalMem / (1024*1024*1024)).toFixed(1) %> GB</span></div>
       <div class="stat-label">Memory</div>
-      <div class="stat-sub" id="sys-mem-sub"><%= (system.usedMem / (1024*1024*1024)).toFixed(1) %> / <%= (system.totalMem / (1024*1024*1024)).toFixed(1) %> GB</div>
+      <div class="stat-bar"><div class="stat-bar-fill stat-bar-green" id="sys-mem-bar" style="width:<%= system.memPercent %>%"></div></div>
     </div>
   </div>
-  <div class="card stat-card stat-card-plain">
-    <div class="stat-icon stat-icon-orange">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3"/></svg>
-    </div>
-    <div class="stat-body">
-      <div class="stat-num" id="sys-disk">
-        <% if (system.disk && system.disk.total > 0) { %><%= system.disk.percent %>%<% } else { %>-<% } %>
-      </div>
-      <div class="stat-label">Disk</div>
-      <div class="stat-sub" id="sys-disk-sub">
-        <% if (system.disk && system.disk.total > 0) { %>
-          <%= (system.disk.used / (1024*1024*1024)).toFixed(1) %> / <%= (system.disk.total / (1024*1024*1024)).toFixed(1) %> GB
-        <% } else { %>unavailable<% } %>
-      </div>
-    </div>
-  </div>
-  <div class="card stat-card stat-card-plain">
+
+  <div class="stat-card stat-card-plain">
     <div class="stat-icon stat-icon-teal">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
     </div>
     <div class="stat-body">
-      <div class="stat-num stat-num-sm">
-        <span class="net-arrow" title="Upload">↑</span> <span id="sys-net-up">—</span>
-      </div>
-      <div class="stat-label">Network</div>
-      <div class="stat-sub">
-        <span class="net-arrow" title="Download">↓</span> <span id="sys-net-down">—</span>
-      </div>
+      <div class="stat-label">Internet Speed</div>
+      <div class="stat-net-row"><span class="net-arrow">↑</span> Upload <span class="stat-net-val" id="sys-net-up">—</span></div>
+      <div class="stat-net-row"><span class="net-arrow">↓</span> Download <span class="stat-net-val" id="sys-net-down">—</span></div>
     </div>
   </div>
-  <div class="card stat-card stat-card-plain">
-    <div class="stat-icon stat-icon-green">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-    </div>
+
+</div>
+
+<!-- Secondary info row -->
+<div class="stat-grid stat-grid-5" style="margin-top:1rem">
+  <a href="/videos" class="stat-card stat-card-sm">
     <div class="stat-body">
-      <div class="stat-num" id="sys-uptime"><%
+      <div class="stat-num-sm"><%= videoCount %></div>
+      <div class="stat-label">Videos <span class="muted">(<%= readyCount %> ready)</span></div>
+    </div>
+  </a>
+  <a href="/streams" class="stat-card stat-card-sm">
+    <div class="stat-body">
+      <div class="stat-num-sm"><%= streamCount %></div>
+      <div class="stat-label">Streams</div>
+    </div>
+  </a>
+  <a href="/schedules" class="stat-card stat-card-sm">
+    <div class="stat-body">
+      <div class="stat-num-sm"><%= pendingSchedules %></div>
+      <div class="stat-label">Schedules</div>
+    </div>
+  </a>
+  <div class="stat-card stat-card-sm">
+    <div class="stat-body">
+      <div class="stat-num-sm" id="sys-disk">
+        <% if (system.disk && system.disk.total > 0) { %><%= system.disk.percent %>%<% } else { %>-<% } %>
+      </div>
+      <div class="stat-label">Disk <span class="muted" id="sys-disk-sub"><% if (system.disk && system.disk.total > 0) { %><%= (system.disk.used / (1024*1024*1024)).toFixed(1) %>/<%= (system.disk.total / (1024*1024*1024)).toFixed(1) %>GB<% } %></span></div>
+    </div>
+  </div>
+  <div class="stat-card stat-card-sm">
+    <div class="stat-body">
+      <div class="stat-num-sm" id="sys-uptime"><%
         const d = Math.floor(system.uptime / 86400);
         const h = Math.floor((system.uptime % 86400) / 3600);
         const m = Math.floor((system.uptime % 3600) / 60);
       %><%= d > 0 ? d + 'd ' : '' %><%= h %>h <%= m %>m</div>
       <div class="stat-label">Uptime</div>
-      <div class="stat-sub">server</div>
     </div>
   </div>
 </div>
@@ -154,21 +108,31 @@
     if (bps < 1024 * 1024) return (bps / 1024).toFixed(0) + ' KB/s';
     return (bps / (1024 * 1024)).toFixed(2) + ' MB/s';
   }
+  function smoothUpdate(el, newText) {
+    if (!el || el.textContent === newText) return;
+    el.style.opacity = '0.5';
+    el.textContent = newText;
+    requestAnimationFrame(() => { el.style.opacity = '1'; });
+  }
   function update(d) {
-    document.getElementById('sys-cpu').textContent = d.cpuPercent + '%';
-    document.getElementById('sys-cpu-sub').textContent = d.cpuCount + ' cores · load ' + d.loadAvg[0].toFixed(2);
-    document.getElementById('sys-mem').textContent = d.memPercent + '%';
-    document.getElementById('sys-mem-sub').textContent = (d.usedMem / (1024*1024*1024)).toFixed(1) + ' / ' + (d.totalMem / (1024*1024*1024)).toFixed(1) + ' GB';
-    document.getElementById('sys-uptime').textContent = fmtUptime(d.uptime);
+    smoothUpdate(document.getElementById('sys-cpu'), d.cpuPercent + '%');
+    const cpuBar = document.getElementById('sys-cpu-bar');
+    if (cpuBar) cpuBar.style.width = d.cpuPercent + '%';
+
+    smoothUpdate(document.getElementById('sys-mem'), (d.usedMem / (1024*1024*1024)).toFixed(1) + ' GB');
+    const memBar = document.getElementById('sys-mem-bar');
+    if (memBar) memBar.style.width = d.memPercent + '%';
+
+    smoothUpdate(document.getElementById('sys-uptime'), fmtUptime(d.uptime));
+
     if (d.disk && d.disk.total > 0) {
-      document.getElementById('sys-disk').textContent = d.disk.percent + '%';
-      document.getElementById('sys-disk-sub').textContent =
-        (d.disk.used / (1024*1024*1024)).toFixed(1) + ' / ' +
-        (d.disk.total / (1024*1024*1024)).toFixed(1) + ' GB';
+      smoothUpdate(document.getElementById('sys-disk'), d.disk.percent + '%');
+      const diskSub = document.getElementById('sys-disk-sub');
+      if (diskSub) diskSub.textContent = (d.disk.used / (1024*1024*1024)).toFixed(1) + '/' + (d.disk.total / (1024*1024*1024)).toFixed(1) + 'GB';
     }
     if (d.net && d.net.available) {
-      document.getElementById('sys-net-up').textContent = fmtSpeed(d.net.upload);
-      document.getElementById('sys-net-down').textContent = fmtSpeed(d.net.download);
+      smoothUpdate(document.getElementById('sys-net-up'), fmtSpeed(d.net.upload));
+      smoothUpdate(document.getElementById('sys-net-down'), fmtSpeed(d.net.download));
     }
   }
 
@@ -199,7 +163,7 @@
       } catch (_) {}
     }
     poll();
-    setInterval(poll, 3000);
+    setInterval(poll, 2000);
   }
 })();
 
