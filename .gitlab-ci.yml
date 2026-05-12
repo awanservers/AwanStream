@@ -49,39 +49,37 @@ deploy:
   before_script:
     - 'command -v ssh-agent >/dev/null || ( apk add --update openssh )'
     - eval $(ssh-agent -s)
-    - chmod 400 "$SSH_PRIVATE_KEY"
-    - ssh-add "$SSH_PRIVATE_KEY"
+    # DEPLOY_SSH_KEY type File — value is a path to temp file containing the key.
+    - chmod 400 "$DEPLOY_SSH_KEY"
+    - ssh-add "$DEPLOY_SSH_KEY"
     - mkdir -p ~/.ssh
     - chmod 700 ~/.ssh
-    - ssh-keyscan -H $SERVER_IP >> ~/.ssh/known_hosts || true
+    - ssh-keyscan -H $DEPLOY_HOST >> ~/.ssh/known_hosts || true
   script:
     - echo "🚀 Deploying AwanStream to production..."
     - |
-      ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_IP "
-        echo '1. Creating project directory...' &&
+      ssh -o StrictHostKeyChecking=no $DEPLOY_USER@$DEPLOY_HOST "
         mkdir -p $DEPLOY_PATH &&
         cd $DEPLOY_PATH &&
-
-        echo '2. Writing .env...' &&
         cat > .env << 'ENVEOF'
-      PORT=${APP_PORT:-7575}
-      SESSION_SECRET=${SESSION_SECRET}
+      PORT=$APP_PORT
+      SESSION_SECRET=$SESSION_SECRET
       NODE_ENV=production
-      TZ=${APP_TZ:-Asia/Jakarta}
-      TZ_LABEL=${APP_TZ_LABEL:-WIB}
+      TZ=$APP_TZ
+      TZ_LABEL=$APP_TZ_LABEL
       ENVEOF
-        chmod 600 .env &&
-
-        echo '3. Login to GitLab Registry...' &&
+        chmod 600 .env
+      "
+    - scp docker-compose.yml $DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/docker-compose.yml
+    - |
+      ssh -o StrictHostKeyChecking=no $DEPLOY_USER@$DEPLOY_HOST "
+        cd $DEPLOY_PATH &&
+        echo '1. Login to GitLab Registry...' &&
         docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY &&
-
-        echo '4. Pulling latest image...' &&
+        echo '2. Pulling latest image...' &&
         docker pull $CI_REGISTRY_IMAGE:latest &&
-
-        echo '5. Restarting containers...' &&
+        echo '3. Restarting containers...' &&
         docker compose down 2>/dev/null || true &&
         docker compose up -d &&
-
         echo '✅ Deploy complete!'
       "
-    - scp docker-compose.yml $SERVER_USER@$SERVER_IP:$DEPLOY_PATH/docker-compose.yml
