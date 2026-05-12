@@ -4,104 +4,87 @@ stages:
   - deploy
 
 variables:
-  NODE_IMAGE: node:20-bookworm-slim
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: ""
 
-# --- Test stage ---
-test:
+unit-test:
   stage: test
-  image: $NODE_IMAGE
-  before_script:
-    - apt-get update -qq && apt-get install -y -qq ffmpeg > /dev/null 2>&1
+  image: node:20-alpine
+  script:
+    - echo "Install dependencies..."
     - npm ci --omit=dev
-  script:
+    - echo "Menjalankan smoke test..."
     - node scripts/smoke.js
+    - echo "Menjalankan render check..."
     - node scripts/render-check.js
-  rules:
-    - if: $CI_COMMIT_BRANCH
+  allow_failure: false
+  only:
+    - main
+    - merge_requests
 
-# --- Build stage ---
-build:
+build-and-push:
   stage: build
-  image: docker:24
+  image: docker:24.0.5
   services:
-    - docker:24-dind
-  variables:
-    DOCKER_TLS_CERTDIR: "/certs"
-    IMAGE_TAG: $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
-    IMAGE_LATEST: $CI_REGISTRY_IMAGE:latest
+    - docker:24.0.5-dind
   before_script:
-    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
   script:
-    - docker build -t $IMAGE_TAG -t $IMAGE_LATEST .
-    - docker push $IMAGE_TAG
-    - docker push $IMAGE_LATEST
-  rules:
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - echo "Membangun Docker Image Versi $CI_COMMIT_SHORT_SHA..."
+    - docker build -t "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA" .
+    - echo "Mendorong Image ke GitLab Registry..."
+    - docker push "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
+    - docker tag "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA" "$CI_REGISTRY_IMAGE:latest"
+    - docker push "$CI_REGISTRY_IMAGE:latest"
+  only:
+    - main
 
-# --- Deploy stage ---
-deploy:
+# ==========================================
+# STAGE AUTO DEPLOYMENT
+# ==========================================
+deploy-to-server:
   stage: deploy
   image: alpine:latest
   environment:
     name: AwanStream
-  rules:
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   before_script:
     - 'command -v ssh-agent >/dev/null || ( apk add --update openssh )'
     - eval $(ssh-agent -s)
-    - |
-      echo "=== Diagnostic ==="
-      echo "Branch               : $CI_COMMIT_REF_NAME"
-      echo "Default branch       : $CI_DEFAULT_BRANCH"
-      echo "Ref protected        : $CI_COMMIT_REF_PROTECTED"
-      echo "Environment          : $CI_ENVIRONMENT_NAME"
-      check() { [ -n "$2" ] && echo "$1 set: yes" || echo "$1 set: NO"; }
-      check DEPLOY_HOST      "$DEPLOY_HOST"
-      check DEPLOY_USER      "$DEPLOY_USER"
-      check DEPLOY_PATH      "$DEPLOY_PATH"
-      check DEPLOY_SSH_KEY   "$DEPLOY_SSH_KEY"
-      check SESSION_SECRET   "$SESSION_SECRET"
-      check APP_PORT         "$APP_PORT"
-      echo "=================="
-      if [ -z "$DEPLOY_SSH_KEY" ]; then
-        echo ""
-        echo "DEPLOY_SSH_KEY is empty. Common causes:"
-        echo "  1. Variable still Protected, branch not protected"
-        echo "  2. Variable environment scope does not match job environment"
-        echo "  3. Variable type is 'Variable' instead of 'File'"
-        exit 1
-      fi
-      echo "DEPLOY_SSH_KEY path = $DEPLOY_SSH_KEY"
     - chmod 400 "$DEPLOY_SSH_KEY"
     - ssh-add "$DEPLOY_SSH_KEY"
     - mkdir -p ~/.ssh
     - chmod 700 ~/.ssh
     - ssh-keyscan -H $DEPLOY_HOST >> ~/.ssh/known_hosts || true
   script:
-    - echo "🚀 Deploying AwanStream to production..."
+    - echo "🚀 Memulai Auto-Deploy AwanStream Versi $CI_COMMIT_SHORT_SHA..."
+    # 1. Siapkan folder di server
+    - ssh $DEPLOY_USER@$DEPLOY_HOST "mkdir -p $DEPLOY_PATH"
+    # 2. Generate .env dari CI variables
     - |
-      ssh -o StrictHostKeyChecking=no $DEPLOY_USER@$DEPLOY_HOST "
-        mkdir -p $DEPLOY_PATH &&
-        cd $DEPLOY_PATH &&
-        cat > .env << 'ENVEOF'
+      ssh $DEPLOY_USER@$DEPLOY_HOST "cat > $DEPLOY_PATH/.env << 'EOF'
       PORT=$APP_PORT
       SESSION_SECRET=$SESSION_SECRET
       NODE_ENV=production
       TZ=$APP_TZ
       TZ_LABEL=$APP_TZ_LABEL
-      ENVEOF
-        chmod 600 .env
-      "
+      DOCKER_IMAGE=$CI_REGISTRY_IMAGE:latest
+      EOF
+      chmod 600 $DEPLOY_PATH/.env"
+    # 3. Kirim docker-compose.yml
     - scp docker-compose.yml $DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/docker-compose.yml
+    # 4. Pull image + restart container
     - |
-      ssh -o StrictHostKeyChecking=no $DEPLOY_USER@$DEPLOY_HOST "
+      ssh $DEPLOY_USER@$DEPLOY_HOST "
         cd $DEPLOY_PATH &&
-        echo '1. Login to GitLab Registry...' &&
+        echo '1. Login ke GitLab Registry...' &&
         docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY &&
-        echo '2. Pulling latest image...' &&
+        echo '2. Pull image versi $CI_COMMIT_SHORT_SHA...' &&
         docker pull $CI_REGISTRY_IMAGE:latest &&
-        echo '3. Restarting containers...' &&
+        echo '3. Restart container...' &&
         docker compose down 2>/dev/null || true &&
         docker compose up -d &&
-        echo '✅ Deploy complete!'
-      "
+        echo '4. Bersih-bersih image lama...' &&
+        docker image prune -a -f"
+    - echo "✅ Auto-CD Versi $CI_COMMIT_SHORT_SHA Selesai!"
+  only:
+    - main
