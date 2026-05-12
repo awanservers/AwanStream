@@ -104,9 +104,10 @@
   }
   function fmtSpeed(bps) {
     if (bps == null || bps <= 0) return 'Idle';
-    if (bps < 1024) return bps + ' B/s';
-    if (bps < 1024 * 1024) return (bps / 1024).toFixed(0) + ' KB/s';
-    return (bps / (1024 * 1024)).toFixed(2) + ' MB/s';
+    // Convert bytes/sec to megabits/sec (bps * 8 / 1_000_000)
+    const mbps = (bps * 8) / 1000000;
+    if (mbps < 1) return (mbps * 1000).toFixed(0) + ' Kbps';
+    return mbps.toFixed(2) + ' Mbps';
   }
   function smoothUpdate(el, newText) {
     if (!el || el.textContent === newText) return;
