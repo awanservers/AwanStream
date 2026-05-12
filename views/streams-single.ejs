@@ -248,16 +248,20 @@
       <button type="button" class="modal-close" data-close-modal aria-label="Close">×</button>
     </header>
     <div class="modal-body">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;gap:0.5rem;flex-wrap:wrap">
         <span class="small muted" id="stream-log-status">Loading…</span>
-        <label class="inline-check small" style="margin:0">
-          <input type="checkbox" id="stream-log-autoscroll" checked>
-          Auto-scroll
-        </label>
+        <div style="display:flex;gap:0.75rem;align-items:center">
+          <span class="small muted" id="stream-log-lines">—</span>
+          <label class="inline-check small" style="margin:0">
+            <input type="checkbox" id="stream-log-autoscroll" checked>
+            Auto-scroll
+          </label>
+        </div>
       </div>
       <pre class="log-box" id="stream-log-content" style="max-height:400px">Loading…</pre>
     </div>
     <footer class="modal-footer">
+      <button type="button" class="btn" id="stream-log-copy" title="Copy log ke clipboard">📋 Copy</button>
       <button type="button" class="btn" id="stream-log-refresh">Refresh</button>
       <button type="button" class="btn" data-close-modal>Close</button>
     </footer>
@@ -269,9 +273,12 @@
   if (!dlg) return;
   const nameEl = document.getElementById('stream-log-name');
   const statusEl = document.getElementById('stream-log-status');
+  const linesEl = document.getElementById('stream-log-lines');
   const contentEl = document.getElementById('stream-log-content');
   const autoscrollEl = document.getElementById('stream-log-autoscroll');
   const refreshBtn = document.getElementById('stream-log-refresh');
+  const copyBtn = document.getElementById('stream-log-copy');
+  const TAIL_LINES = 80;
   let currentStreamId = null;
   let pollTimer = null;
   let isRunning = false;
@@ -279,7 +286,7 @@
   async function fetchLog() {
     if (!currentStreamId) return;
     try {
-      const r = await fetch('/streams/' + currentStreamId + '/log', { cache: 'no-store' });
+      const r = await fetch('/streams/' + currentStreamId + '/log?lines=' + TAIL_LINES, { cache: 'no-store' });
       if (!r.ok) {
         statusEl.textContent = 'Failed to load log (' + r.status + ')';
         return;
@@ -287,6 +294,8 @@
       const text = await r.text();
       const wasAtBottom = contentEl.scrollHeight - contentEl.scrollTop - contentEl.clientHeight < 20;
       contentEl.textContent = text || '(log empty)';
+      const lineCount = text ? text.split('\n').filter(Boolean).length : 0;
+      linesEl.textContent = 'Showing last ' + lineCount + ' line' + (lineCount === 1 ? '' : 's');
       if (autoscrollEl.checked && (wasAtBottom || contentEl.textContent === '(log empty)')) {
         contentEl.scrollTop = contentEl.scrollHeight;
       }
@@ -307,6 +316,7 @@
     isRunning = btn.dataset.streamStatus === 'running';
     statusEl.textContent = 'Loading…';
     contentEl.textContent = 'Loading…';
+    linesEl.textContent = '—';
     fetchLog();
     if (pollTimer) clearInterval(pollTimer);
     if (isRunning) pollTimer = setInterval(fetchLog, 3000);
@@ -318,6 +328,32 @@
   });
 
   refreshBtn.addEventListener('click', fetchLog);
+
+  copyBtn.addEventListener('click', async () => {
+    const text = contentEl.textContent || '';
+    if (!text || text === '(log empty)' || text === 'Loading…') return;
+    const original = copyBtn.textContent;
+    try {
+      await navigator.clipboard.writeText(text);
+      copyBtn.textContent = '✓ Copied';
+    } catch (err) {
+      // Fallback untuk browser / context tanpa Clipboard API (e.g., HTTP + non-localhost).
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      try {
+        document.execCommand('copy');
+        copyBtn.textContent = '✓ Copied';
+      } catch (e2) {
+        copyBtn.textContent = '✗ Failed';
+      }
+      document.body.removeChild(ta);
+    }
+    setTimeout(() => { copyBtn.textContent = original; }, 1500);
+  });
 })();
 </script>
 

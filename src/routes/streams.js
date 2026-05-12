@@ -177,7 +177,8 @@ router.post('/:id/edit', (req, res) => {
 });
 
 router.get('/:id/log', (req, res) => {
-  res.type('text/plain').send(streamManager.tailLog(Number(req.params.id)));
+  const lines = Math.max(10, Math.min(500, Number(req.query.lines) || 80));
+  res.type('text/plain').send(streamManager.tailLog(Number(req.params.id), lines));
 });
 
 module.exports = router;
