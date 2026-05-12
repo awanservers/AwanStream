@@ -7,7 +7,7 @@ Versi belum di-tag — pakai tanggal sebagai penanda release.
 
 ## [Unreleased]
 
-### Added
+### Addeds
 - **Stream History** — riwayat semua sesi streaming yang sudah selesai. Otomatis tercatat saat stream stop (manual atau natural finish) atau error. Halaman `/history` menampilkan stream name, video, platform, durasi, status, dan waktu. Bisa hapus per-entry atau clear all. Minimum 10 detik durasi untuk tercatat.
 - **Auto-Retry with Exponential Backoff** — kalau FFmpeg crash (exit code non-zero), stream otomatis retry hingga 5x dengan delay exponential (3s → 60s max + jitter). User stop = no retry. Retry status terlihat di `last_error` stream. Reset otomatis setelah stream berhasil jalan.
 - **Stream Health Check** — polling setiap 30 detik mendeteksi stream yang stale (tidak ada output FFmpeg selama 5 menit). Stream stale otomatis di-kill dan masuk retry logic.
