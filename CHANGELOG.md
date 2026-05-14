@@ -7,6 +7,20 @@ Versi belum di-tag — pakai tanggal sebagai penanda release.
 
 ## [Unreleased]
 
+### Added — YouTube Upload: Restart-aware retry
+- **`reconcileOnBoot()` di `youtubeUploader.js`** — message lebih actionable: "Upload interrupted by server restart. Click Retry to upload again." (dari sebelumnya generic "upload interrupted").
+- **Retry button (orange refresh icon) di video library** — muncul kalau ada upload yang ke-interrupt server restart. Klik buka modal upload lagi (start dari awal — true resume tidak di-support karena googleapis tidak expose resumable upload URL).
+- **Disclaimer di upload modal** — warn user bahwa kalau server restart mid-upload, harus mulai ulang. Tujuan: set expectation untuk file besar (10+ GB) yang butuh waktu lama.
+- Annotation `youtube_interrupted` flag di video library row (dari `last_error` regex match).
+
+### Added — Audio Loudness Normalization
+- **EBU R128 / ITU BS.1770 normalization** ke -14 LUFS (YouTube standard) — bikin volume audio konsisten antar video, viewer tidak perlu adjust volume saat ganti video di playlist.
+- **Phase 1 — Audio Library** — semua audio yang di-upload otomatis di-normalize via 2-pass `loudnorm` filter (analyze → apply). File overwrite di disk. Loudness measurements (integrated LUFS, true peak, LRA) disimpan di kolom baru `audio_tracks.{integrated_lufs, true_peak_db, loudness_range, normalized}`. UI di `/audio` tampilkan kolom **Loudness** dengan badge ✓ -14 LUFS dan source loudness di tooltip.
+- **Phase 2 — Loop output** — `loudnorm=I=-14:TP=-1.5:LRA=11` di-chain ke audio filter di phase 2 (smooth) atau single pass (fast), apply setelah `amix`. Output video Loop guaranteed -14 LUFS regardless of source levels (video crackling + audio overlay). Solve real problem: kalau audio overlay di-attenuate ke 0.3 dan video source quiet, output sebelumnya bisa jadi -22 LUFS (terlalu pelan). Sekarang konsisten.
+- **Module API baru** di `audioManager.js`: `normalize(path)`, `analyzeLoudness(path)`, `applyLoudnessNormalization(path, measured)`, `LOUDNESS_TARGET`.
+- **Soft fail** — kalau normalize gagal saat upload, file tetap bisa dipakai (`normalized=0`), error logged ke `last_error`.
+- **Codec preservation** saat normalize: MP3 → libmp3lame, M4A/AAC → aac, OGG/Opus → libopus, WAV/FLAC → flac, lainnya → aac fallback.
+
 ### Added — YouTube Integration (Phase 2: Upload)
 - **Tombol "Upload to YouTube"** di video library — muncul untuk video status `ready`. Dropdown privacy: Unlisted (default, rekomendasi), Private, atau Public. Default category: Music (10).
 - **Resumable upload** via `googleapis` library — handle chunked upload + auto-retry transparently. Progress real-time via polling (2 detik). Bytes sent + percent + status di UI.

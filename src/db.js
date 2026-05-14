@@ -182,6 +182,18 @@ function ensureSchema() {
     db.exec(`ALTER TABLE playlists ADD COLUMN shuffle INTEGER NOT NULL DEFAULT 0`);
   }
 
+  // Audio tracks migrations: loudness metadata (EBU R128 / ITU BS.1770).
+  const acols = db.prepare('PRAGMA table_info(audio_tracks)').all().map((c) => c.name);
+  const adda = (name, type, def) => {
+    if (!acols.includes(name)) {
+      db.exec(`ALTER TABLE audio_tracks ADD COLUMN ${name} ${type} DEFAULT ${def}`);
+    }
+  };
+  adda('integrated_lufs', 'REAL', 'NULL');     // measured integrated loudness (LUFS)
+  adda('true_peak_db', 'REAL', 'NULL');        // measured true peak (dBFS)
+  adda('loudness_range', 'REAL', 'NULL');      // measured LRA (LU)
+  adda('normalized', 'INTEGER NOT NULL', '0'); // 1 if file has been loudness-normalized
+
   // One-time cleanup: streams.audio_id used to reference videos(id) during
   // early development of the Audio Overlay feature. It now references
   // audio_tracks(id). Clear any stale values that would point to videos which

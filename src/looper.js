@@ -266,10 +266,15 @@ function runFastPhase(ctx) {
     // Check if source video has audio (cached or probe once).
     const srcHasAudio = probeHasAudio(srcPath);
 
+    // Build the audio filter chain. Final stage is loudnorm to -14 LUFS
+    // (YouTube standard) so output is consistent regardless of source levels.
+    const loudnormFilter = 'loudnorm=I=-14:TP=-1.5:LRA=11';
+
     if (audioMode === 'replace' || !srcHasAudio) {
       // Overlay becomes the only audio.
       args.push(
-        '-filter_complex', `[1:a]volume=${audioVolume}[aout]`,
+        '-filter_complex',
+        `[1:a]volume=${audioVolume},${loudnormFilter}[aout]`,
         '-map', '0:v:0',
         '-map', '[aout]',
       );
@@ -277,7 +282,7 @@ function runFastPhase(ctx) {
       // Mix video audio (full volume) + overlay (configurable volume).
       args.push(
         '-filter_complex',
-        `[0:a]volume=1.0[va];[1:a]volume=${audioVolume}[oa];[va][oa]amix=inputs=2:duration=first:dropout_transition=2[aout]`,
+        `[0:a]volume=1.0[va];[1:a]volume=${audioVolume}[oa];[va][oa]amix=inputs=2:duration=first:dropout_transition=2,${loudnormFilter}[aout]`,
         '-map', '0:v:0',
         '-map', '[aout]',
       );
@@ -434,16 +439,20 @@ function runSmoothPhase2(ctx) {
     // Seamless unit may or may not have audio (depends on source). Check once.
     const seamlessHasAudio = probeHasAudio(seamlessPath);
 
+    // Final loudness normalization to -14 LUFS (YouTube standard) so output
+    // is consistent regardless of source levels.
+    const loudnormFilter = 'loudnorm=I=-14:TP=-1.5:LRA=11';
+
     if (audioMode === 'replace' || !seamlessHasAudio) {
       args.push(
-        '-filter_complex', `[1:a]volume=${audioVolume}[aout]`,
+        '-filter_complex', `[1:a]volume=${audioVolume},${loudnormFilter}[aout]`,
         '-map', '0:v:0',
         '-map', '[aout]',
       );
     } else {
       args.push(
         '-filter_complex',
-        `[0:a]volume=1.0[va];[1:a]volume=${audioVolume}[oa];[va][oa]amix=inputs=2:duration=first:dropout_transition=2[aout]`,
+        `[0:a]volume=1.0[va];[1:a]volume=${audioVolume}[oa];[va][oa]amix=inputs=2:duration=first:dropout_transition=2,${loudnormFilter}[aout]`,
         '-map', '0:v:0',
         '-map', '[aout]',
       );

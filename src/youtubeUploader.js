@@ -261,8 +261,10 @@ function getLatestUploadForVideo(videoId) {
 
 function reconcileOnBoot() {
   // Any 'uploading' or 'pending' rows from a previous run are stale.
+  // googleapis doesn't expose the resumable upload URL, so we can't truly
+  // resume across server restarts — user has to start over.
   db.prepare(`UPDATE youtube_uploads
-    SET status='error', last_error='upload interrupted by server restart'
+    SET status='error', last_error='Upload interrupted by server restart. Click Retry to upload again.'
     WHERE status IN ('pending', 'uploading')`).run();
 }
 

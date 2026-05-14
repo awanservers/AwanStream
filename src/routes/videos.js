@@ -93,6 +93,9 @@ router.get('/', (req, res) => {
         v.youtube_percent = last.percent;
         v.youtube_video_id = last.youtube_video_id;
         v.youtube_last_error = last.last_error;
+        // Flag interrupted uploads so UI can show a Retry button.
+        v.youtube_interrupted = last.status === 'error' &&
+          last.last_error && /interrupted by server restart/i.test(last.last_error);
       }
     }
   });

@@ -22,6 +22,7 @@
         <th>Format</th>
         <th>Duration</th>
         <th>Bitrate</th>
+        <th>Loudness</th>
         <th>Size</th>
         <th>Status</th>
         <th>Uploaded</th>
@@ -38,12 +39,28 @@
              const bitrate = t.bitrate ? Math.round(t.bitrate / 1000) + ' kbps' : '-';
              const codec = t.codec ? t.codec.toUpperCase() : '-';
              const ch = t.channels === 1 ? 'mono' : (t.channels === 2 ? 'stereo' : '');
+             const lufs = (t.integrated_lufs !== null && t.integrated_lufs !== undefined)
+               ? t.integrated_lufs.toFixed(1) + ' LUFS' : '';
+             const peak = (t.true_peak_db !== null && t.true_peak_db !== undefined)
+               ? t.true_peak_db.toFixed(1) + ' dB' : '';
         %>
           <tr>
             <td class="truncate" title="<%= t.title %>"><%= t.title %></td>
             <td class="small muted"><%= codec %><% if (ch) { %> · <%= ch %><% } %></td>
             <td class="small muted"><%= dur %></td>
             <td class="small muted"><%= bitrate %></td>
+            <td class="small muted">
+              <% if (t.normalized) { %>
+                <span title="Normalized to -14 LUFS (YouTube standard). Source was <%= lufs %>, peak <%= peak %>." style="color:#22c55e;">
+                  ✓ -14 LUFS
+                </span>
+                <% if (lufs) { %><div class="small muted" style="font-size:0.7rem;">src: <%= lufs %></div><% } %>
+              <% } else if (lufs) { %>
+                <%= lufs %>
+              <% } else { %>
+                -
+              <% } %>
+            </td>
             <td class="small muted"><%= sizeMb %></td>
             <td>
               <span class="badge badge-<%= t.status === 'uploaded' ? 'ready' : t.status %>"><%= t.status %></span>
@@ -89,7 +106,7 @@
         <div class="grid-2">
           <label class="full">File
             <input type="file" name="audio" accept=".mp3,.m4a,.aac,.wav,.ogg,.opus,.flac,.wma,audio/*" required>
-            <span class="small muted">Max 500 MB. Format: MP3, M4A, AAC, WAV, OGG, OPUS, FLAC, WMA.</span>
+            <span class="small muted">Max 500 MB. Format: MP3, M4A, AAC, WAV, OGG, OPUS, FLAC, WMA. Setelah upload, audio otomatis di-normalize ke -14 LUFS (YouTube standard) untuk loudness konsisten antar track.</span>
           </label>
           <label class="full">Title <span class="muted small">(opsional)</span>
             <input type="text" name="title" placeholder="Kosongkan untuk pakai nama file">

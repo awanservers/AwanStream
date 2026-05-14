@@ -1,12 +1,23 @@
 // Audio tracks manager — separate from videos.
-// Handles ffprobe for audio files, stores metadata, cleanup on delete.
+// Handles ffprobe for audio files, stores metadata, cleanup on delete,
+// and EBU R128 loudness normalization (target -14 LUFS = YouTube standard).
 const fs = require('fs');
 const path = require('path');
-const { spawnSync } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const { db } = require('./db');
 
 const audioDir = path.join(__dirname, '..', 'public', 'uploads', 'audio');
 if (!fs.existsSync(audioDir)) fs.mkdirSync(audioDir, { recursive: true });
+
+const logsDir = path.join(__dirname, '..', 'logs');
+if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
+
+// Loudness normalization defaults — YouTube standard.
+const LOUDNESS_TARGET = {
+  I: -14,    // integrated loudness (LUFS)
+  TP: -1.5,  // true peak limit (dBFS)
+  LRA: 11,   // loudness range (LU)
+};
 
 // Supported audio extensions for the upload filter.
 const SUPPORTED_EXT = /\.(mp3|m4a|aac|wav|ogg|opus|flac|wma)$/i;
@@ -16,8 +27,138 @@ function isSupportedFilename(filename) {
 }
 
 /**
- * Probe an audio file with ffprobe. Returns metadata or nulls on failure.
+ * Pass 1 of two-pass loudness normalization: analyze.
+ * Runs `loudnorm` filter with `print_format=json` and parses the resulting
+ * measurements from FFmpeg's stderr.
+ *
+ * Returns measurement object on success, null on failure.
+ *   { input_i, input_tp, input_lra, input_thresh, target_offset }
  */
+function analyzeLoudness(filePath) {
+  const args = [
+    '-hide_banner', '-nostats',
+    '-i', filePath,
+    '-af', `loudnorm=I=${LOUDNESS_TARGET.I}:TP=${LOUDNESS_TARGET.TP}:LRA=${LOUDNESS_TARGET.LRA}:print_format=json`,
+    '-f', 'null', '-',
+  ];
+  const r = spawnSync('ffmpeg', args, { encoding: 'utf8', timeout: 5 * 60 * 1000 });
+  if (r.status !== 0) return null;
+
+  // FFmpeg prints the JSON block at the end of stderr. Find it.
+  const stderr = String(r.stderr || '');
+  const start = stderr.lastIndexOf('{');
+  const end = stderr.lastIndexOf('}');
+  if (start === -1 || end === -1 || end <= start) return null;
+
+  try {
+    const json = JSON.parse(stderr.slice(start, end + 1));
+    return {
+      input_i: parseFloat(json.input_i),
+      input_tp: parseFloat(json.input_tp),
+      input_lra: parseFloat(json.input_lra),
+      input_thresh: parseFloat(json.input_thresh),
+      target_offset: parseFloat(json.target_offset),
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
+ * Pass 2 of two-pass loudness normalization: apply with measured values.
+ * Re-encodes the audio file to the input file path (overwrites). Returns
+ * true on success, false on failure.
+ *
+ * Output codec is preserved when possible:
+ *   - .mp3   → libmp3lame
+ *   - .m4a/.aac → aac
+ *   - .ogg/.opus → libopus
+ *   - .wav/.flac → flac (lossless)
+ *   - else → aac (safe fallback)
+ */
+function applyLoudnessNormalization(filePath, measured) {
+  const ext = path.extname(filePath).toLowerCase();
+  let outCodec, outExt;
+  switch (ext) {
+    case '.mp3':           outCodec = 'libmp3lame'; outExt = '.mp3'; break;
+    case '.m4a': case '.aac': outCodec = 'aac';     outExt = ext;    break;
+    case '.opus': case '.ogg': outCodec = 'libopus'; outExt = ext;   break;
+    case '.flac': case '.wav': outCodec = 'flac';   outExt = '.flac'; break;
+    default:               outCodec = 'aac';        outExt = '.m4a'; break;
+  }
+
+  const tmpPath = filePath + '.norm-tmp' + outExt;
+
+  const af = [
+    'loudnorm',
+    `I=${LOUDNESS_TARGET.I}`,
+    `TP=${LOUDNESS_TARGET.TP}`,
+    `LRA=${LOUDNESS_TARGET.LRA}`,
+    `measured_I=${measured.input_i}`,
+    `measured_TP=${measured.input_tp}`,
+    `measured_LRA=${measured.input_lra}`,
+    `measured_thresh=${measured.input_thresh}`,
+    `offset=${measured.target_offset}`,
+    'linear=true',
+    'print_format=summary',
+  ].join(':');
+
+  const args = [
+    '-hide_banner', '-nostats', '-y',
+    '-i', filePath,
+    '-af', af,
+    '-c:a', outCodec,
+    '-ar', '48000',  // resample to 48k for consistency (loudnorm requires 192k internally anyway)
+    tmpPath,
+  ];
+
+  const r = spawnSync('ffmpeg', args, { encoding: 'utf8', timeout: 10 * 60 * 1000 });
+  if (r.status !== 0) {
+    if (fs.existsSync(tmpPath)) try { fs.unlinkSync(tmpPath); } catch (_) {}
+    return false;
+  }
+
+  // Replace original with normalized version. If extension changed (e.g. .wav → .flac),
+  // we keep the original filename but the actual content is the new format. This is
+  // a minor inconsistency we accept — alternative is to track new filename in DB.
+  try {
+    fs.unlinkSync(filePath);
+    fs.renameSync(tmpPath, filePath);
+    return true;
+  } catch (e) {
+    if (fs.existsSync(tmpPath)) try { fs.unlinkSync(tmpPath); } catch (_) {}
+    return false;
+  }
+}
+
+/**
+ * Run the full two-pass normalization pipeline on an audio file.
+ * Returns { ok, measured, error }.
+ */
+function normalize(filePath) {
+  const logPath = path.join(logsDir, 'audio-normalize.log');
+  const log = (msg) => {
+    try { fs.appendFileSync(logPath, `[${new Date().toISOString()}] ${msg}\n`); } catch (_) {}
+  };
+
+  log(`normalize start: ${filePath}`);
+  const measured = analyzeLoudness(filePath);
+  if (!measured) {
+    log(`  pass 1 failed (analyze)`);
+    return { ok: false, error: 'Loudness analysis failed (pass 1)' };
+  }
+  log(`  pass 1: I=${measured.input_i} TP=${measured.input_tp} LRA=${measured.input_lra}`);
+
+  const ok = applyLoudnessNormalization(filePath, measured);
+  if (!ok) {
+    log(`  pass 2 failed (apply)`);
+    return { ok: false, error: 'Loudness normalization failed (pass 2)', measured };
+  }
+  log(`  pass 2: applied successfully → ${LOUDNESS_TARGET.I} LUFS target`);
+  return { ok: true, measured };
+}
+
+
 function probe(filePath) {
   const out = { duration: null, codec: null, bitrate: null, sampleRate: null, channels: null };
   const r = spawnSync('ffprobe', [
@@ -68,7 +209,8 @@ function uniqueTitle(base) {
 }
 
 /**
- * Register an uploaded audio file. Inserts DB row + probes metadata.
+ * Register an uploaded audio file. Inserts DB row + probes metadata + runs
+ * EBU R128 loudness normalization to -14 LUFS (YouTube standard).
  * Returns the audio track id.
  */
 function register({ title, filename, size }) {
@@ -78,22 +220,59 @@ function register({ title, filename, size }) {
     VALUES (?, ?, ?, 'uploaded')`).run(finalTitle, filename, size || 0);
   const id = Number(result.lastInsertRowid);
 
-  // Probe in background so response isn't blocked.
+  // Probe + normalize in background so response isn't blocked.
   setImmediate(() => {
     try {
       const filePath = path.join(audioDir, filename);
       const info = probe(filePath);
-      if (info.codec || info.duration) {
-        db.prepare(`UPDATE audio_tracks
-          SET duration_seconds=?, codec=?, bitrate=?, sample_rate=?, channels=?
-          WHERE id=?`).run(
-          info.duration, info.codec, info.bitrate, info.sampleRate, info.channels, id
-        );
-      } else {
-        // Probe found no audio stream — mark as error.
+      if (!info.codec && !info.duration) {
+        // Probe found no audio stream — mark as error, skip normalization.
         db.prepare(`UPDATE audio_tracks SET status='error', last_error=?
           WHERE id=?`).run('No audio stream detected (file may be corrupt or unsupported)', id);
+        return;
       }
+
+      // Persist initial probe metadata first so user sees something while normalize runs.
+      db.prepare(`UPDATE audio_tracks
+        SET duration_seconds=?, codec=?, bitrate=?, sample_rate=?, channels=?
+        WHERE id=?`).run(
+        info.duration, info.codec, info.bitrate, info.sampleRate, info.channels, id
+      );
+
+      // Normalize loudness (two-pass, EBU R128 → -14 LUFS).
+      // This is destructive: overwrites the file in place.
+      const result = normalize(filePath);
+      if (!result.ok) {
+        // Soft fail: keep file as-is, mark normalized=0, log error.
+        // Track is still usable, just not loudness-consistent.
+        db.prepare(`UPDATE audio_tracks
+          SET last_error=?, normalized=0
+          WHERE id=?`).run('Loudness normalization failed: ' + result.error, id);
+        return;
+      }
+
+      // Re-probe the normalized file to refresh size + bitrate (codec may have changed).
+      const newInfo = probe(filePath);
+      const stat = fs.statSync(filePath);
+
+      db.prepare(`UPDATE audio_tracks SET
+        size_bytes=?,
+        codec=COALESCE(?, codec),
+        bitrate=COALESCE(?, bitrate),
+        sample_rate=COALESCE(?, sample_rate),
+        integrated_lufs=?,
+        true_peak_db=?,
+        loudness_range=?,
+        normalized=1,
+        last_error=NULL
+        WHERE id=?`).run(
+        stat.size,
+        newInfo.codec, newInfo.bitrate, newInfo.sampleRate,
+        result.measured.input_i,
+        result.measured.input_tp,
+        result.measured.input_lra,
+        id,
+      );
     } catch (e) {
       db.prepare(`UPDATE audio_tracks SET status='error', last_error=?
         WHERE id=?`).run(e.message, id);
@@ -178,4 +357,8 @@ module.exports = {
   listReady,
   get,
   reconcileOnBoot,
+  normalize,
+  analyzeLoudness,
+  applyLoudnessNormalization,
+  LOUDNESS_TARGET,
 };
