@@ -461,6 +461,226 @@ Scan `public/uploads/chunks/` untuk folder > 24 jam → delete. Dipanggil di `ap
 
 ---
 
+## `src/looper.js`
+
+**Purpose:** video Loop tool — perpanjang clip pendek jadi video panjang dengan smooth crossfade atau fast copy. Optional audio overlay.
+
+### State
+
+- `jobs: Map<jobId, jobState>` — in-memory
+- `nextJobId` pakai `Date.now()` (tidak reset setelah restart, supaya log file tidak ke-overwrite)
+
+### Exports
+
+```js
+const looper = require('./looper');
+// Methods: start, cancel, getProgress, listJobs, getJob, isRunning,
+//          tailLog, reconcileOnBoot
+```
+
+#### `start(sourceVideoId, targetSeconds, title, options)` → `{ jobId, outputVideoId, outputFilename, mode }`
+
+- **Throws:**
+  - `Error('Source video not found')`
+  - `Error('Source file missing on disk')`
+  - `Error('Target duration must be a positive number of seconds')`
+  - `Error('Target duration cannot exceed 24 hours')`
+  - `Error('Target (Xs) is shorter than source (Ys)')`
+  - `Error('Source (Xs) too short for smooth mode')`
+
+**Options:**
+- `smooth` — boolean, default `true`
+- `crossfadeSeconds` — number, default `1.0`
+- `audioId` — number, optional (audio overlay dari `audio_tracks`)
+- `audioVolume` — number 0.0-1.0, default `0.3`
+- `audioMode` — `'mix'` (default) atau `'replace'`
+
+**Side effects:**
+- Insert row `videos` dengan `status='transcoding'`, `loop_job_id` set ke jobId
+- Phase 1 (smooth only): re-encode seamless unit dengan `xfade`/`acrossfade` filter
+- Phase 2: `-stream_loop -1 -i seamless -c copy` + optional audio overlay via `amix`
+- On success: update `videos.status='ready'`, generate thumbnail
+- On failure: update `videos.status='error'`, cleanup file
+- Job stays in Map sampai exit handler hapus
+
+#### `cancel(jobId)` → `boolean`
+
+SIGTERM ke process aktif. Cleanup seamless intermediate file.
+
+#### `getProgress(jobId)` → `object | null`
+
+```js
+{
+  jobId, mode, sourceVideoId, outputVideoId, target,
+  percent, time, duration, speed,
+  phase, phaseLabel, startedAt
+}
+```
+
+#### `tailLog(jobId, lines=100)` → `string`
+
+Baca `logs/loop-<jobId>.log`. Bisa di-akses setelah job selesai (file persist di disk).
+
+**Sentuh file ini kalau:** tambah preset durasi, ubah crossfade strategy, tambah filter video (zoom/crop untuk hide watermark), tambah resume across server restarts.
+
+---
+
+## `src/audioManager.js`
+
+**Purpose:** Audio Library manager — terpisah dari videos. Handle upload/probe/cleanup file audio.
+
+### Exports
+
+```js
+const audioManager = require('./audioManager');
+// Methods: register, getFilePath, remove, list, listReady, get,
+//          probe, isSupportedFilename, reconcileOnBoot, audioDir
+```
+
+#### `register({ title, filename, size })` → `audioId` (number)
+
+Insert row baru di `audio_tracks`. Probe metadata async via `setImmediate()`. Kalau probe tidak detect audio stream, status di-set ke `error` dengan message.
+
+#### `getFilePath(audioId)` → `string | null`
+
+Return absolute path ke file kalau ada di disk, null kalau row tidak ada atau file missing.
+
+#### `remove(audioId)` → `{ ok, error? }`
+
+- Guard: kalau audio dipakai stream yang lagi running → return `{ ok: false, error: '...' }`
+- Null out `streams.audio_id` di stream yang reference audio ini
+- Delete row + file di disk
+
+#### `list()` / `listReady()` / `get(audioId)`
+
+Standard CRUD reads. `listReady()` filter `status='uploaded'` untuk dropdown picker.
+
+#### `probe(filePath)` → `{ duration, codec, bitrate, sampleRate, channels }`
+
+Sync ffprobe. Return semua null kalau gagal.
+
+#### `isSupportedFilename(name)` → `boolean`
+
+Match regex `\.(mp3|m4a|aac|wav|ogg|opus|flac|wma)$`.
+
+**Sentuh file ini kalau:** tambah format audio baru, tambah download-from-URL untuk audio, tambah preview player.
+
+---
+
+## `src/youtubeManager.js`
+
+**Purpose:** YouTube OAuth manager (Phase 1). Handle authorization flow + token persistence + auto-refresh.
+
+### State
+
+- Tabel `youtube_accounts` (single row, multi-row not supported by current logic)
+
+### Exports
+
+```js
+const youtubeManager = require('./youtubeManager');
+// Methods: SCOPES, isConfigured, getAuthUrl, exchangeCodeAndStore,
+//          getAccount, getAuthedClient, getStatus, disconnect,
+//          reconcileOnBoot
+```
+
+#### `isConfigured()` → `boolean`
+
+Cek env vars `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`, `YOUTUBE_REDIRECT_URI`.
+
+#### `getAuthUrl()` → `string`
+
+Return Google OAuth consent URL. **Throws** kalau credentials belum diset.
+
+Scopes: `youtube.upload`, `youtube.readonly`. `access_type: 'offline'` + `prompt: 'consent'` supaya selalu dapat refresh_token.
+
+#### `exchangeCodeAndStore(code)` → `{ channelId, channelTitle }` (async)
+
+- Exchange auth code → tokens via OAuth2 client
+- Fetch channel info via `youtube.channels.list({ mine: true })`
+- `DELETE FROM youtube_accounts` (single-account model)
+- INSERT row baru dengan tokens + channel info
+
+#### `getAuthedClient()` → `OAuth2Client | null`
+
+Return OAuth2 client object dengan credentials dari DB. **Auto-refresh transparently** — pakai `oauth2.on('tokens', ...)` untuk persist refreshed tokens kembali ke DB.
+
+#### `getStatus()` → `{ connected, configured, channelId?, channelTitle?, connectedAt? }`
+
+Quick check untuk UI badges.
+
+#### `disconnect()` → `{ ok, alreadyDisconnected?, revokeError? }` (async)
+
+- Try revoke token di Google (best-effort, kalau gagal tetap clear DB)
+- `DELETE FROM youtube_accounts`
+
+**Sentuh file ini kalau:** tambah multi-account support, tambah encrypt token at rest (pakai SESSION_SECRET sebagai key), submit OAuth consent untuk verification.
+
+---
+
+## `src/youtubeUploader.js`
+
+**Purpose:** YouTube upload manager (Phase 2). Resumable upload via googleapis.
+
+### State
+
+- `jobs: Map<jobId, { jobState, abortController, logStream }>` — in-memory
+- Tabel `youtube_uploads` track full lifecycle
+
+### Exports
+
+```js
+const youtubeUploader = require('./youtubeUploader');
+// Methods: start, cancel, getProgress, listJobs,
+//          getLatestUploadForVideo, tailLog, reconcileOnBoot
+```
+
+#### `start(videoId, options)` → `{ jobId, uploadId }`
+
+- **Throws:**
+  - `Error('Video not found')`
+  - `Error('Video file missing on disk')`
+  - `Error('No YouTube account connected')`
+  - `Error('An upload for this video is already in progress')`
+
+**Options:**
+- `title` — default `videos.title`, max 100 chars
+- `description` — default empty
+- `privacy` — `'private'` | `'unlisted'` (default) | `'public'`
+- `categoryId` — default `'10'` (Music)
+- `tags` — array, default empty (max 30)
+
+**Side effects:**
+- Insert row `youtube_uploads` dengan `status='pending'`
+- Spawn upload async (fire-and-forget) via `youtube.videos.insert({ media: { body: fs.createReadStream(...) } })`
+- Progress tracked via `onUploadProgress` callback, persisted ke DB tiap 5%
+- AbortController di-attach untuk cancel
+- On success: update DB `status='done'`, `youtube_video_id`, `finished_at`
+- On error: update DB `status='error'`, `last_error`
+- Job stays in Map 30 detik setelah selesai supaya client bisa poll final status
+
+#### `cancel(jobId)` → `boolean`
+
+`abortController.abort()` → trigger AbortError di googleapis → exit handler set `status='cancelled'`.
+
+#### `getProgress(jobId)` → `jobState | null`
+
+```js
+{
+  jobId, uploadId, videoId, title, privacy, categoryId,
+  status, bytesSent, totalBytes, percent,
+  youtubeVideoId, error, startedAt, finishedAt
+}
+```
+
+#### `getLatestUploadForVideo(videoId)` → DB row atau null
+
+Priority: `status='done'` row terbaru. Fallback ke row apa pun terbaru. Dipakai untuk annotate video library row.
+
+**Sentuh file ini kalau:** tambah set thumbnail via API, tambah set tags/description templates, tambah schedule publish via API, tambah resume across server restarts (need to persist resumable upload URL).
+
+---
+
 ## System monitor & SSE
 
 Implemented langsung di `app.js`, bukan module terpisah.
@@ -607,6 +827,40 @@ Kenapa redirect bukan JSON:
 | POST | `/schedules/:id/delete` | DELETE row |
 
 Helper internal `parseLocalToUTC(str, tz)` — convert `YYYY-MM-DDTHH:MM` (browser datetime-local) ke UTC ISO based on IANA timezone dari env `TZ`. Handle DST dan cross-day dengan benar (tested via `scripts/test-tz.js`).
+
+### `src/routes/looper.js`
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/looper` | Form + active jobs + recent errors + audio tracks dropdown |
+| POST | `/looper/start` | Start loop job dengan optional audio overlay |
+| GET | `/looper/progress` | JSON polling untuk update active jobs table |
+| POST | `/looper/:jobId/cancel` | Abort job + cleanup |
+| GET | `/looper/:jobId/log` | Text log tail |
+| GET | `/looper/video/:videoId/log` | Log by output video id (untuk video error) |
+
+### `src/routes/audio.js`
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/audio` | List audio tracks |
+| POST | `/audio/upload` | XHR upload (multer single, 500 MB limit, ekstensi whitelist) |
+| POST | `/audio/:id/rename` | Update title |
+| POST | `/audio/:id/delete` | Guard against running streams + cleanup file |
+| GET | `/audio/:id/download` | Download dengan filename friendly |
+
+### `src/routes/youtube.js`
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/youtube` | Status page (3 states: not-configured / not-connected / connected) |
+| GET | `/youtube/connect` | Redirect ke Google OAuth consent screen |
+| GET | `/youtube/callback` | OAuth callback handler — exchange code, persist tokens |
+| POST | `/youtube/disconnect` | Revoke token + clear DB |
+| POST | `/youtube/upload/:videoId` | Start upload (return JSON kalau Accept: application/json) |
+| GET | `/youtube/upload/:jobId/progress` | JSON progress polling |
+| POST | `/youtube/upload/:jobId/cancel` | Abort upload via AbortController |
+| GET | `/youtube/uploads/active` | List in-memory active jobs |
 
 ---
 

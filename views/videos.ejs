@@ -165,6 +165,39 @@
               <a href="/videos/<%= v.id %>/download" class="btn-icon" title="Download" download>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
               </a>
+              <% if (v.status === 'ready') { %>
+                <% if (v.youtube_status === 'uploading' || v.youtube_status === 'pending') { %>
+                  <button type="button" class="btn-icon"
+                          title="Uploading to YouTube — <%= v.youtube_percent || 0 %>% — klik untuk lihat detail"
+                          data-yt-watch-job="<%= v.youtube_job_id %>"
+                          data-yt-watch-video="<%= v.id %>"
+                          data-yt-resume-job="<%= v.youtube_job_id %>"
+                          data-video-title="<%= v.title %>"
+                          style="color:var(--accent);">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+                    <span class="yt-pct" style="font-size:10px;font-weight:600;margin-left:2px;"><%= v.youtube_percent || 0 %>%</span>
+                  </button>
+                <% } else if (v.youtube_video_id) { %>
+                  <a href="https://studio.youtube.com/video/<%= v.youtube_video_id %>/edit"
+                     target="_blank" rel="noopener"
+                     class="btn-icon" style="color:#22c55e;"
+                     title="Uploaded — open in YouTube Studio">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+                  </a>
+                <% } else if (youtubeConnected) { %>
+                  <button type="button" class="btn-icon"
+                          data-open-modal="upload-youtube"
+                          data-video-id="<%= v.id %>"
+                          data-video-title="<%= v.title %>"
+                          title="Upload to YouTube">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+                  </button>
+                <% } else { %>
+                  <a href="/youtube" class="btn-icon" title="Connect YouTube to enable upload" style="opacity:0.5;">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+                  </a>
+                <% } %>
+              <% } %>
               <form method="POST" action="/videos/<%= v.id %>/delete" class="inline"
                     data-confirm="Hapus video '<%= v.title %>'? File di disk akan ikut terhapus."
                     data-confirm-title="Hapus video"
@@ -930,4 +963,264 @@ document.addEventListener('modal:before-open', (e) => {
   document.getElementById('edit-video-folder').value = btn.dataset.folderId || '';
 });
 </script>
+
+<!-- YouTube Upload Modal -->
+<dialog id="upload-youtube" class="modal">
+  <div class="modal-card">
+    <header class="modal-header">
+      <h2>Upload to YouTube</h2>
+      <button type="button" class="modal-close" data-close-modal aria-label="Close">×</button>
+    </header>
+    <form id="upload-youtube-form" method="POST">
+      <div class="modal-body">
+        <p class="muted small" style="margin-top:0;">
+          Video di-upload sebagai <strong>Unlisted</strong> by default — kamu bisa edit metadata (title, description, tags, thumbnail) dan publish manual lewat YouTube Studio setelah selesai.
+        </p>
+        <div class="grid-2">
+          <label class="full">Title
+            <input type="text" name="title" id="yt-upload-title" required maxlength="100">
+            <span class="small muted">Max 100 karakter. Default pakai title video di Library.</span>
+          </label>
+          <label class="full">Privacy
+            <select name="privacy" id="yt-upload-privacy">
+              <option value="unlisted" selected>Unlisted (rekomendasi — bisa diakses via link, tidak muncul di search)</option>
+              <option value="private">Private (hanya kamu yang bisa lihat)</option>
+              <option value="public">Public (langsung publish — pastikan title & thumbnail sudah final)</option>
+            </select>
+          </label>
+          <label>Category
+            <select name="category_id" id="yt-upload-category">
+              <option value="10" selected>Music</option>
+              <option value="22">People &amp; Blogs</option>
+              <option value="24">Entertainment</option>
+              <option value="20">Gaming</option>
+              <option value="27">Education</option>
+              <option value="28">Science &amp; Technology</option>
+            </select>
+          </label>
+        </div>
+
+        <div id="yt-upload-progress" style="display:none; margin-top:18px;">
+          <div class="progress"><div class="progress-bar" id="yt-upload-bar" style="width:0%"></div></div>
+          <div class="small muted" id="yt-upload-status" style="margin-top:6px;">Starting…</div>
+        </div>
+
+        <div id="yt-upload-error" class="alert alert-error" style="display:none; margin-top:14px;"></div>
+        <div id="yt-upload-done" class="alert alert-info" style="display:none; margin-top:14px;"></div>
+      </div>
+      <footer class="modal-footer">
+        <button type="button" class="btn" id="yt-upload-cancel-btn" style="display:none;">Cancel upload</button>
+        <button type="button" class="btn" data-close-modal id="yt-upload-close-btn">Close</button>
+        <button type="submit" class="btn btn-primary" id="yt-upload-submit-btn">Start upload</button>
+      </footer>
+    </form>
+  </div>
+</dialog>
+
+<script>
+(function() {
+  const form = document.getElementById('upload-youtube-form');
+  if (!form) return;
+  const titleEl = document.getElementById('yt-upload-title');
+  const submitBtn = document.getElementById('yt-upload-submit-btn');
+  const closeBtn = document.getElementById('yt-upload-close-btn');
+  const cancelBtn = document.getElementById('yt-upload-cancel-btn');
+  const progressDiv = document.getElementById('yt-upload-progress');
+  const progressBar = document.getElementById('yt-upload-bar');
+  const statusEl = document.getElementById('yt-upload-status');
+  const errEl = document.getElementById('yt-upload-error');
+  const doneEl = document.getElementById('yt-upload-done');
+
+  let currentVideoId = null;
+  let currentJobId = null;
+  let pollTimer = null;
+  let resumeMode = false; // true if reopened to track an in-flight upload
+
+  function resetModal() {
+    progressDiv.style.display = 'none';
+    progressBar.style.width = '0%';
+    statusEl.textContent = '';
+    errEl.style.display = 'none';
+    errEl.textContent = '';
+    doneEl.style.display = 'none';
+    doneEl.innerHTML = '';
+    submitBtn.disabled = false;
+    submitBtn.style.display = '';
+    cancelBtn.style.display = 'none';
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    resumeMode = false;
+  }
+
+  function fmtBytes(b) {
+    if (!b) return '0 B';
+    if (b < 1024) return b + ' B';
+    if (b < 1024*1024) return (b/1024).toFixed(1) + ' KB';
+    if (b < 1024*1024*1024) return (b/(1024*1024)).toFixed(1) + ' MB';
+    return (b/(1024*1024*1024)).toFixed(2) + ' GB';
+  }
+
+  document.addEventListener('modal:before-open', (e) => {
+    if (e.detail.id !== 'upload-youtube') return;
+    const btn = e.detail.trigger;
+    if (!btn) return;
+    currentVideoId = btn.dataset.videoId;
+    titleEl.value = btn.dataset.videoTitle || '';
+    resetModal();
+  });
+
+  document.getElementById('upload-youtube').addEventListener('close', () => {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  });
+
+  async function pollProgress() {
+    if (!currentJobId) return;
+    try {
+      const r = await fetch('/youtube/upload/' + currentJobId + '/progress', { cache: 'no-store' });
+      if (!r.ok) {
+        if (r.status === 404) {
+          // Job expired from memory, assume done — reload to show new state.
+          clearInterval(pollTimer); pollTimer = null;
+          window.location.reload();
+        }
+        return;
+      }
+      const j = await r.json();
+      if (!j.ok) return;
+      progressBar.style.width = (j.percent || 0) + '%';
+      const sent = fmtBytes(j.bytesSent);
+      const total = fmtBytes(j.totalBytes);
+      statusEl.textContent = (j.status === 'pending' ? 'Preparing…' : 'Uploading') +
+        ' — ' + (j.percent || 0) + '% (' + sent + ' / ' + total + ')';
+
+      if (j.status === 'done') {
+        clearInterval(pollTimer); pollTimer = null;
+        cancelBtn.style.display = 'none';
+        doneEl.style.display = 'block';
+        const ytId = j.youtubeVideoId;
+        doneEl.innerHTML =
+          '✓ Upload selesai!<br>' +
+          '<a href="https://studio.youtube.com/video/' + ytId + '/edit" target="_blank" rel="noopener" class="btn btn-primary" style="margin-top:8px;">Open in YouTube Studio</a> ' +
+          '<a href="https://www.youtube.com/watch?v=' + ytId + '" target="_blank" rel="noopener" class="btn" style="margin-top:8px;">View on YouTube</a>';
+        statusEl.textContent = '';
+      } else if (j.status === 'error') {
+        clearInterval(pollTimer); pollTimer = null;
+        cancelBtn.style.display = 'none';
+        errEl.style.display = 'block';
+        errEl.textContent = '✗ Upload gagal: ' + (j.error || 'unknown error');
+        statusEl.textContent = '';
+      } else if (j.status === 'cancelled') {
+        clearInterval(pollTimer); pollTimer = null;
+        cancelBtn.style.display = 'none';
+        errEl.style.display = 'block';
+        errEl.textContent = 'Upload cancelled.';
+        statusEl.textContent = '';
+      }
+    } catch (e) { /* network blip — keep polling */ }
+  }
+
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    if (resumeMode) return; // don't submit again — already uploading
+    if (!currentVideoId) return;
+    resetModal();
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Starting…';
+
+    const fd = new FormData(form);
+    try {
+      const r = await fetch('/youtube/upload/' + currentVideoId, {
+        method: 'POST',
+        headers: { 'Accept': 'application/json' },
+        body: fd,
+      });
+      const j = await r.json();
+      submitBtn.textContent = 'Start upload';
+      if (!r.ok || !j.ok) {
+        errEl.style.display = 'block';
+        errEl.textContent = j.error || 'Failed to start upload';
+        submitBtn.disabled = false;
+        return;
+      }
+      currentJobId = j.jobId;
+      submitBtn.style.display = 'none';
+      cancelBtn.style.display = '';
+      progressDiv.style.display = 'block';
+      statusEl.textContent = 'Uploading — 0%';
+      // Start polling.
+      pollTimer = setInterval(pollProgress, 2000);
+      pollProgress();
+    } catch (e) {
+      errEl.style.display = 'block';
+      errEl.textContent = 'Network error: ' + e.message;
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Start upload';
+    }
+  });
+
+  cancelBtn.addEventListener('click', async () => {
+    if (!currentJobId) return;
+    if (!confirm('Cancel upload? Progress yang sudah dikirim akan hilang.')) return;
+    cancelBtn.disabled = true;
+    try {
+      await fetch('/youtube/upload/' + currentJobId + '/cancel', {
+        method: 'POST',
+        headers: { 'Accept': 'application/json' },
+      });
+    } catch (_) {}
+    cancelBtn.disabled = false;
+  });
+
+  // Watch active jobs in the table (kalau modal closed tapi job masih running).
+  // Update percent badge on YouTube icon every 3s.
+  document.querySelectorAll('[data-yt-watch-job]').forEach((el) => {
+    const jobId = el.dataset.ytWatchJob;
+    if (!jobId) return;
+
+    // Click handler: re-open modal in "resume mode" to show full progress detail.
+    el.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      currentJobId = jobId;
+      currentVideoId = el.dataset.ytWatchVideo || null;
+      resumeMode = true;
+      // Pre-fill UI to "uploading" view immediately.
+      resetModal();
+      resumeMode = true; // resetModal clears it, set again
+      titleEl.value = el.dataset.videoTitle || '(uploading)';
+      submitBtn.style.display = 'none';
+      cancelBtn.style.display = '';
+      progressDiv.style.display = 'block';
+      const pct = el.querySelector('.yt-pct');
+      if (pct) statusEl.textContent = 'Reconnecting to upload — ' + pct.textContent;
+      else statusEl.textContent = 'Reconnecting to upload…';
+      // Open modal manually (not via data-open-modal to avoid the modal:before-open
+      // event resetting state).
+      const dlg = document.getElementById('upload-youtube');
+      if (dlg && !dlg.open) dlg.showModal();
+      // Start polling immediately.
+      pollProgress();
+      if (pollTimer) clearInterval(pollTimer);
+      pollTimer = setInterval(pollProgress, 2000);
+    });
+
+    setInterval(async () => {
+      try {
+        const r = await fetch('/youtube/upload/' + jobId + '/progress', { cache: 'no-store' });
+        if (!r.ok) {
+          if (r.status === 404) window.location.reload(); // job done/expired
+          return;
+        }
+        const j = await r.json();
+        if (!j.ok) return;
+        const pctEl = el.querySelector('.yt-pct');
+        if (pctEl) pctEl.textContent = (j.percent || 0) + '%';
+        el.title = 'Uploading to YouTube — ' + (j.percent || 0) + '% — klik untuk lihat detail';
+        if (j.status === 'done' || j.status === 'error' || j.status === 'cancelled') {
+          window.location.reload();
+        }
+      } catch (_) {}
+    }, 3000);
+  });
+})();
+</script>
+
 <%- include('partials/footer') %>

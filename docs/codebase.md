@@ -155,6 +155,85 @@ API publik:
 
 **Sentuh file ini kalau:** re-enable chunked upload di client (UI di `views/videos.ejs`), tambah resume logic, ubah chunk size.
 
+### `src/looper.js`
+Video Loop tool — perpanjang clip pendek jadi video panjang dengan smooth crossfade atau fast copy. API publik:
+- `start(sourceVideoId, targetSeconds, title, options)` → `{ jobId, outputVideoId, outputFilename, mode }`
+  - `options.smooth` — boolean, default true (crossfade seamless di loop boundary)
+  - `options.crossfadeSeconds` — number, default 1.0
+  - `options.audioId` — number, optional (audio overlay dari audio_tracks)
+  - `options.audioVolume` — number 0.0-1.0, default 0.3
+  - `options.audioMode` — `'mix'` (default) atau `'replace'`
+- `cancel(jobId)` → boolean
+- `getProgress(jobId)` / `listJobs()` / `getJob(jobId)`
+- `tailLog(jobId, lines)` → string
+- `reconcileOnBoot()`
+
+State: `jobs: Map<jobId, jobState>`. Job ID pakai `Date.now()` (tidak reset setelah restart).
+
+Two-phase pipeline (smooth mode):
+1. **Phase 1** — bikin seamless unit pakai `xfade` + `acrossfade` filter. Re-encode (libx264 + aac).
+2. **Phase 2** — `-stream_loop -1 -i seamless -c copy -t target` + optional audio overlay via `amix`.
+
+Output video baru di-insert ke tabel `videos` dengan status `transcoding` → `ready` setelah selesai. `loop_job_id` di-track supaya log file (`logs/loop-<jobId>.log`) bisa di-akses dari UI.
+
+**Sentuh file ini kalau:** tambah preset durasi, ubah crossfade strategy, tambah filter video (zoom/crop untuk hide watermark), ubah audio mix logic.
+
+### `src/audioManager.js`
+Audio Library manager — terpisah dari videos. API publik:
+- `register({ title, filename, size })` — insert DB row + probe async, return audio id
+- `getFilePath(audioId)` → absolute path atau null
+- `remove(audioId)` → `{ ok, error? }` — guard against running streams
+- `list()` / `listReady()` / `get(audioId)`
+- `probe(filePath)` → `{ duration, codec, bitrate, sampleRate, channels }`
+- `isSupportedFilename(name)` — check ekstensi (mp3/m4a/aac/wav/ogg/opus/flac/wma)
+- `reconcileOnBoot()` — placeholder untuk future download-from-URL feature
+
+Storage: `public/uploads/audio/` (terpisah dari video `public/uploads/`).
+
+Probe dilakukan async via `setImmediate()` setelah upload — non-blocking response.
+
+**Sentuh file ini kalau:** tambah format audio baru, tambah download-from-URL untuk audio, tambah preview player.
+
+### `src/youtubeManager.js`
+YouTube OAuth manager — Phase 1 dari YouTube integration. API publik:
+- `isConfigured()` → boolean (cek env vars)
+- `getAuthUrl()` → string (URL untuk consent screen)
+- `exchangeCodeAndStore(code)` → `{ channelId, channelTitle }` — exchange auth code, fetch channel info, persist ke DB
+- `getAccount()` → row dari `youtube_accounts` atau null
+- `getAuthedClient()` → OAuth2 client object (auto-refresh via `oauth2.on('tokens')`) atau null
+- `getStatus()` → `{ connected, configured, channelTitle?, channelId?, connectedAt? }`
+- `disconnect()` → `{ ok, alreadyDisconnected?, revokeError? }` — revoke di Google + clear DB
+- `reconcileOnBoot()`
+
+Single-account model — `DELETE FROM youtube_accounts` sebelum INSERT supaya cuma 1 row.
+
+OAuth scopes: `youtube.upload` + `youtube.readonly`.
+
+**Sentuh file ini kalau:** tambah multi-account support (jadi tabel `youtube_accounts` punya banyak row), tambah encrypt token at rest (pakai SESSION_SECRET sebagai key).
+
+### `src/youtubeUploader.js`
+YouTube upload manager — Phase 2 dari YouTube integration. API publik:
+- `start(videoId, options)` → `{ jobId, uploadId }`
+  - `options.title` — default `videos.title`
+  - `options.privacy` — `'private'` | `'unlisted'` (default) | `'public'`
+  - `options.categoryId` — default `'10'` (Music)
+- `cancel(jobId)` → boolean
+- `getProgress(jobId)` → jobState atau null
+- `listJobs()` → array of in-memory jobs
+- `getLatestUploadForVideo(videoId)` → row dari `youtube_uploads` atau null (priority: status='done' first)
+- `tailLog(uploadId, lines)` → string
+- `reconcileOnBoot()` — reset stale `pending`/`uploading` rows
+
+State: `jobs: Map<jobId, { jobState, abortController, logStream }>`.
+
+Resumable upload via `googleapis` library — `youtube.videos.insert({ media: { body: fs.createReadStream(...) } }, { signal })`. Library handle chunked transfer + auto-retry transparently. AbortController untuk cancel.
+
+Progress tracking via `onUploadProgress` callback — persist ke DB tiap 5% (avoid hammering DB).
+
+Tabel `youtube_uploads` track full lifecycle: status, bytes_sent, total_bytes, percent, last_error, started_at, finished_at, youtube_video_id (set saat selesai).
+
+**Sentuh file ini kalau:** tambah set thumbnail via API, tambah set tags/description templates, tambah schedule publish via API, tambah resume across server restarts.
+
 ## `src/routes/`
 
 ### `src/routes/auth.js`
@@ -163,15 +242,13 @@ API publik:
 - `POST /logout` → destroy session
 
 ### `src/routes/videos.js`
-- `GET /videos` → render library dengan pagination 20/page (query param `page`, `folder`)
-- `POST /videos/upload` → multer single file (XHR), probe video info via ffprobe, generate thumbnail async via `setImmediate()`, auto-suffix duplicate title, insert row `status='uploaded'`
-- `POST /videos/import-url` → `downloader.start(url, title)`, redirect with notice
+- `GET /videos` → render library dengan pagination 20/page (query param `page`, `folder`). Annotate setiap video dengan YouTube upload state (active job atau latest DB row).
+- `POST /videos/upload` → multer single file (XHR), probe video info via ffprobe (termasuk `has_audio`), generate thumbnail async via `setImmediate()`, auto-suffix duplicate title
+- `POST /videos/import-url` → `downloader.start(url, title)`
 - `GET /videos/download/:jobId/progress` → JSON download progress
-- `GET /videos/:id/progress` → JSON `{status, running, percent, time, duration, speed, fps, last_error}` (dipakai polling UI)
-- `GET /videos/:id/status` → JSON gabungan progress + log tail + ETA (dipakai job detail modal)
-- `POST /videos/:id/prepare` → `transcoder.start(...)`
-- `POST /videos/:id/cancel-prepare` → `transcoder.cancel(...)`, set status balik
-- `GET /videos/:id/prepare-log` → `text/plain` log tail
+- `GET /videos/:id/progress` → JSON polling
+- `GET /videos/:id/status` → JSON progress + log tail + ETA (job detail modal)
+- `POST /videos/:id/prepare` / `cancel-prepare` / `GET /videos/:id/prepare-log`
 - `POST /videos/:id/edit` → rename + move folder (dengan guard: tidak boleh duplicate title)
 - `POST /videos/:id/regen-thumb` → manual trigger `generateThumbnail()`
 - `POST /videos/:id/move-folder` → single-video folder change

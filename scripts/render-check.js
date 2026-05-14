@@ -45,6 +45,7 @@ const pages = [
       videos: [{ id: 1, title: 't', filename: 'f.mp4', size_bytes: 1000000,
                  status: 'ready', last_error: null, created_at: '2026-05-11 10:00:00' }],
       presets: { '720p30': {}, '1080p30': {} },
+      youtubeConnected: false,
     },
   },
   {
@@ -150,6 +151,40 @@ const pages = [
         status: 'uploaded', last_error: null,
         created_at: '2026-05-13 10:00:00',
       }],
+    },
+  },
+  {
+    name: 'youtube-not-configured',
+    file: 'youtube.ejs',
+    locals: {
+      ...common,
+      currentUser: { id: 1, username: 'admin' },
+      configured: false,
+      status: { connected: false, configured: false },
+    },
+  },
+  {
+    name: 'youtube-not-connected',
+    file: 'youtube.ejs',
+    locals: {
+      ...common,
+      currentUser: { id: 1, username: 'admin' },
+      configured: true,
+      status: { connected: false, configured: true },
+    },
+  },
+  {
+    name: 'youtube-connected',
+    file: 'youtube.ejs',
+    locals: {
+      ...common,
+      currentUser: { id: 1, username: 'admin' },
+      configured: true,
+      status: {
+        connected: true, configured: true,
+        channelId: 'UCabcdef123', channelTitle: 'My Cozy Channel',
+        connectedAt: '2026-05-14 10:00:00',
+      },
     },
   },
 ];

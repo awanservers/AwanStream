@@ -7,6 +7,33 @@ Versi belum di-tag — pakai tanggal sebagai penanda release.
 
 ## [Unreleased]
 
+### Added — YouTube Integration (Phase 2: Upload)
+- **Tombol "Upload to YouTube"** di video library — muncul untuk video status `ready`. Dropdown privacy: Unlisted (default, rekomendasi), Private, atau Public. Default category: Music (10).
+- **Resumable upload** via `googleapis` library — handle chunked upload + auto-retry transparently. Progress real-time via polling (2 detik). Bytes sent + percent + status di UI.
+- **Cancel upload** mid-progress — abort signal ke googleapis. Cleanup DB row + log "cancelled".
+- **Status indicators** di video library:
+  - **Belum upload** → tombol YouTube putih (klik buka modal)
+  - **Uploading** → icon YouTube biru dengan badge percent (e.g. "47%"), auto-refresh 3s
+  - **Done** → icon YouTube hijau (klik buka YouTube Studio untuk edit metadata + publish)
+  - **Belum connect** → icon abu-abu, klik redirect ke `/youtube`
+- **Tabel baru `youtube_uploads`** — track semua upload jobs. Fields: video_id, youtube_video_id, title, privacy, category_id, status, bytes_sent, total_bytes, percent, last_error, started_at, finished_at. Status state machine: `pending → uploading → done | error | cancelled`.
+- **Module `src/youtubeUploader.js`** — pattern mirip `transcoder.js`/`looper.js`: in-memory `jobs` Map + DB persistence + `reconcileOnBoot()` reset stale uploads.
+- **Routes baru:** `POST /youtube/upload/:videoId` (start), `GET /youtube/upload/:jobId/progress` (polling), `POST /youtube/upload/:jobId/cancel`, `GET /youtube/uploads/active` (list active jobs).
+- **Log per upload:** `logs/youtube-upload-<uploadId>.log` — capture full lifecycle + error response details dari Google API.
+- **Default behavior:** privacy=unlisted, notifySubscribers=false, selfDeclaredMadeForKids=false, no description/tags (user edit manual di Studio setelah upload).
+- **Auto-detect duplicate jobs** — kalau video sama lagi uploading, throw error supaya tidak upload 2x.
+
+### Added — YouTube Integration (Phase 1: Auth)
+- **OAuth2 connection ke YouTube** — halaman baru `/youtube` untuk hubungkan akun YouTube ke AwanStream. Single-account model. Token refresh otomatis (googleapis library handle transparently). Disconnect tombol revoke token di Google + clear DB.
+- **Tabel baru `youtube_accounts`** — store access_token, refresh_token, channel_id, channel_title, expiry_date.
+- **Module `src/youtubeManager.js`** — API: `isConfigured()`, `getAuthUrl()`, `exchangeCodeAndStore()`, `getAuthedClient()`, `getStatus()`, `disconnect()`. Auto-persist refreshed tokens via `oauth2.on('tokens')`.
+- **Routes** — `GET /youtube` (status page), `GET /youtube/connect` (redirect to consent), `GET /youtube/callback` (OAuth callback handler), `POST /youtube/disconnect`.
+- **Setup guide** di `docs/youtube-setup.md` — step-by-step Google Cloud Console + OAuth consent screen + redirect URI configuration.
+- **Sidebar nav** — "YouTube" item baru dengan icon YouTube logo.
+- **Env vars baru (opsional):** `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`, `YOUTUBE_REDIRECT_URI`.
+- **Phase 2 (planned):** tombol "Upload to YouTube" di video library, resumable upload dengan progress, default privacy=private (user publish manual via YouTube Studio).
+- **Dependency baru:** `googleapis ^171.4.0`.
+
 ### Added — Download buttons & Security hardening
 - **Tombol Download di Library** — video library dan audio library sekarang punya tombol download per row. File dikirim dengan filename yang friendly (dari title, sanitized ASCII-only untuk RFC 6266 compliance). Express `res.download()` handle HTTP Range requests otomatis, jadi file besar (10+ GB) bisa resume kalau pakai download manager seperti IDM/FDM.
 - **Thumbnail tools untuk YouTube** — di video preview modal ada 2 tombol baru:

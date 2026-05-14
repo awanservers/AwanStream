@@ -6,6 +6,8 @@ const { db } = require('../db');
 const transcoder = require('../transcoder');
 const downloader = require('../downloader');
 const chunkUpload = require('../chunkUpload');
+const youtubeManager = require('../youtubeManager');
+const youtubeUploader = require('../youtubeUploader');
 
 const router = express.Router();
 const uploadDir = path.join(__dirname, '..', '..', 'public', 'uploads');
@@ -67,10 +69,41 @@ router.get('/', (req, res) => {
   const currentFolder = folderId ? db.prepare('SELECT * FROM folders WHERE id=?').get(folderId) : null;
   const totalPages = Math.max(1, Math.ceil(totalCount / perPage));
 
+  // Annotate each video with its latest YouTube upload state (if any).
+  // Active in-memory job overrides DB (for live progress).
+  const activeJobs = youtubeUploader.listJobs();
+  const activeByVideoId = new Map();
+  activeJobs.forEach((j) => {
+    if (j.status === 'pending' || j.status === 'uploading') {
+      activeByVideoId.set(j.videoId, j);
+    }
+  });
+
+  videos.forEach((v) => {
+    const active = activeByVideoId.get(v.id);
+    if (active) {
+      v.youtube_status = active.status;
+      v.youtube_percent = active.percent;
+      v.youtube_job_id = active.jobId;
+      v.youtube_video_id = null;
+    } else {
+      const last = youtubeUploader.getLatestUploadForVideo(v.id);
+      if (last) {
+        v.youtube_status = last.status;
+        v.youtube_percent = last.percent;
+        v.youtube_video_id = last.youtube_video_id;
+        v.youtube_last_error = last.last_error;
+      }
+    }
+  });
+
+  const youtubeConnected = !!youtubeManager.getAccount();
+
   res.render('videos', {
     videos, folders, currentFolder, unfolderedCount,
     page, perPage, totalPages, totalCount,
     presets: transcoder.presets(),
+    youtubeConnected,
     error: req.query.error || null,
     notice: req.query.notice || null,
   });

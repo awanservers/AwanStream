@@ -24,3 +24,6 @@ Thumbs.db
 
 # Docker runtime (kalau build lokal)
 docker-compose.override.yml
+
+# GitLab CI (repo utama di GitHub, GitLab CI tidak dipakai)
+.gitlab-ci.yml

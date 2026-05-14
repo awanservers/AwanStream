@@ -9,7 +9,13 @@ Dokumentasi per-fitur AwanStream. Untuk setiap fitur: apa fungsinya, cara pakain
   - [Import dari URL](#import-dari-url)
   - [Prepare (transcode)](#prepare-transcode)
   - [Video Thumbnails](#video-thumbnails)
+  - [Custom thumbnail capture](#custom-thumbnail-capture)
+  - [Video download](#video-download)
   - [Video Folders](#video-folders)
+- [Audio Library](#audio-library)
+- [Loop tool](#loop-tool)
+  - [Smooth vs Fast mode](#smooth-vs-fast-mode)
+  - [Audio overlay di Loop](#audio-overlay-di-loop)
 - [Playlist management](#playlist-management)
   - [Create playlist dengan video picker](#create-playlist-dengan-video-picker)
   - [Manage playlist (modal)](#manage-playlist-modal)
@@ -18,14 +24,20 @@ Dokumentasi per-fitur AwanStream. Untuk setiap fitur: apa fungsinya, cara pakain
 - [Streaming](#streaming)
   - [Stream Single Video](#stream-single-video)
   - [Stream Playlist](#stream-playlist)
+  - [Audio overlay saat streaming](#audio-overlay-saat-streaming)
   - [Auto-Retry + Health Check](#auto-retry--health-check)
   - [Stream Duration Timer](#stream-duration-timer)
   - [Stream Log modal](#stream-log-modal)
   - [Stream Edit modal](#stream-edit-modal)
 - [Scheduling](#scheduling)
 - [Stream History](#stream-history)
+- [YouTube Upload](#youtube-upload)
+  - [Connect (OAuth)](#connect-oauth)
+  - [Upload video](#upload-video)
+  - [Resume modal](#resume-modal)
 - [Dashboard & System Monitor](#dashboard--system-monitor)
 - [HTTP Request Logger (Morgan)](#http-request-logger-morgan)
+- [Security: protected media serving](#security-protected-media-serving)
 - [UI conventions](#ui-conventions)
 
 ---
@@ -182,6 +194,138 @@ Dokumentasi per-fitur AwanStream. Untuk setiap fitur: apa fungsinya, cara pakain
 
 ---
 
+### Custom thumbnail capture
+
+**Apa:** Pilih frame spesifik dari video sebagai thumbnail. Berguna untuk YouTube — pilih frame paling dramatis (api besar, warna pop) supaya CTR thumbnail tinggi.
+
+**Cara pakai:**
+1. Klik thumbnail video di Library → modal preview HTML5 player terbuka
+2. Scrub ke frame yang kamu mau
+3. Pause → klik **📸 Set thumbnail from current frame**
+4. AJAX request ke server, FFmpeg capture frame di detik itu, simpan jadi thumbnail
+5. Image di-update in-place tanpa reload halaman (cache busting via `?v=<timestamp>`)
+
+**Tombol kedua:** **⬇ Download thumbnail** — download JPEG 1280×720 dengan filename dari title video. Cocok sebagai base image untuk edit di Canva.
+
+**Teknis:**
+- `transcoder.generateThumbnail(path, id, { atSecond })` — clamp `atSecond` ke `[0, duration-0.1]`
+- Endpoint `POST /videos/:id/regen-thumb` terima body `at_second` (form atau JSON)
+- AJAX request set `Accept: application/json` → server return JSON `{ok, thumbnail, atSecond}`
+- Endpoint `GET /videos/:id/thumb/download` — `Content-Disposition: attachment` dengan filename `.jpg`
+- Cache-Control turun jadi `max-age=60` supaya thumbnail terupdate cepat
+
+---
+
+### Video download
+
+**Apa:** Download file video dari library ke local disk dengan filename friendly.
+
+**Teknis:**
+- `GET /videos/:id/download` (auth-protected)
+- `res.download(path, downloadName)` — set `Content-Disposition: attachment`
+- Filename ASCII-only (RFC 6266 compliant)
+- Support **HTTP Range** otomatis — file 10+ GB bisa resume kalau pakai download manager (IDM, FDM, aria2)
+
+---
+
+## Audio Library
+
+**Apa:** Storage terpisah untuk file audio (musik background, sound effects). Tidak campur dengan video library.
+
+**Format yang di-support:** MP3, M4A, AAC, WAV, OGG, OPUS, FLAC, WMA
+
+**Cara pakai:**
+1. Buka `/audio` (sidebar: Library → Audio)
+2. Klik **+ Upload audio**, pilih file (max 500 MB), optional title
+3. XHR upload dengan progress bar
+4. Server auto-probe metadata via ffprobe: codec, duration, bitrate, sample rate, channels
+5. Hasil tampil di tabel: Title, Format, Duration, Bitrate, Size, Status, Uploaded
+
+**Actions per row:** Rename, Download, Delete (guard: tidak bisa hapus kalau dipakai stream running).
+
+**Use case:**
+- Background music untuk Loop tool (mix dengan video)
+- Audio overlay saat live streaming (musik background untuk video silent)
+
+**Teknis:**
+- Tabel: `audio_tracks` (id, title, filename, size_bytes, duration_seconds, codec, bitrate, sample_rate, channels, status, last_error, created_at)
+- Module: `src/audioManager.js`
+- Storage: `public/uploads/audio/` (terpisah dari `public/uploads/`)
+- Probe async via `setImmediate()` setelah upload (non-blocking response)
+- Status: `uploaded` (default) atau `error` (kalau probe tidak detect audio stream)
+
+**Endpoints:**
+- `GET /audio` — library page
+- `POST /audio/upload` — multer single file
+- `POST /audio/:id/rename` — update title
+- `POST /audio/:id/delete` — guard + cleanup file
+- `GET /audio/:id/download` — download dengan filename friendly
+
+---
+
+## Loop tool
+
+**Apa:** Perpanjang clip pendek jadi video panjang (30 menit - 24 jam) untuk 24/7 livestream atau YouTube upload.
+
+**Use case utama:** generate fireplace 8 detik via Veo, mau jadi video 10 jam untuk channel YouTube ambient — pakai Loop tool, hasilnya file video panjang siap upload.
+
+**Cara pakai:**
+1. Buka `/looper` (sidebar: Loop)
+2. Pilih video sumber + target durasi (preset 30m/1h/.../24h atau Custom menit)
+3. Pilih mode: **Smooth** (default, recommended) atau **Fast**
+4. (Optional) Audio overlay — pilih audio track + mode (Mix/Replace) + volume
+5. Klik **Start loop**
+6. Progress bar + ETA + phase label di tabel "Active jobs"
+7. Setelah selesai, video baru muncul di `/videos` Library dengan status `ready`
+
+### Smooth vs Fast mode
+
+| Aspek | Smooth | Fast |
+|---|---|---|
+| Loop boundary | Crossfade 1 detik (seamless) | Hard cut |
+| Speed | Phase 1: re-encode (1-5 menit), Phase 2: copy (cepat) | Single pass copy (cepat) |
+| Quality | Sedikit re-encode di seamless unit | 100% lossless |
+| Best for | AI-generated clips yang loopnya tidak natural | Source yang sudah designed untuk loop |
+
+**Teknis Smooth mode:**
+1. Phase 1 — bikin "seamless unit" length L-D dimana boundary di start adalah crossfade `tail → head`. FFmpeg `xfade` filter (video) + `acrossfade` (audio kalau ada).
+2. Phase 2 — `-stream_loop -1 -i seamless.mp4 -c copy -t target` — loop seamless unit sampai durasi target. Mata tidak catch transition karena join ada di tengah crossfade.
+
+### Audio overlay di Loop
+
+**Apa:** Tambahkan audio track saat loop — output adalah video panjang dengan audio sudah di-mix.
+
+**Mode:**
+- **Mix** — gabung dengan suara asli video (default volume overlay 0.3, video 1.0)
+- **Replace** — ganti total suara video
+
+**Teknis:**
+- Phase 2 sekarang punya 2 input: `-i seamless.mp4 -stream_loop -1 -i audio.mp3`
+- Filter: `[0:a]volume=1.0[va];[1:a]volume=<vol>[oa];[va][oa]amix=inputs=2:duration=first[aout]`
+- Audio di-loop independen
+- Video tetap `-c:v copy` (no re-encode!), audio di-encode ke AAC 192k
+
+**Workflow ideal untuk fireplace + jazz:**
+```
+Video fireplace 8s (Veo) + Audio jazz 3 menit (SUNO)
+       ↓
+Loop tool: target 10 jam, Smooth, Mix, volume 0.3
+       ↓
+Phase 1: 1-3 menit
+Phase 2: 2-5 menit
+       ↓
+Output: video 10 jam, ~20-25 GB, siap upload ke YouTube
+```
+
+**Endpoints:**
+- `GET /looper` — form + active jobs + recent errors
+- `POST /looper/start` — start job
+- `GET /looper/progress` — JSON polling
+- `POST /looper/:jobId/cancel` — abort
+- `GET /looper/:jobId/log` / `GET /looper/video/:videoId/log` — text log
+
+---
+
 ## Playlist management
 
 ### Create playlist dengan video picker
@@ -314,6 +458,33 @@ Dokumentasi per-fitur AwanStream. Untuk setiap fitur: apa fungsinya, cara pakain
 
 ---
 
+### Audio overlay saat streaming
+
+**Apa:** Mix audio track terpisah dengan video saat live streaming — musik background untuk video silent (misal fireplace tanpa suara) atau tambahan ambience.
+
+**Cara pakai:**
+1. Upload audio di `/audio` dulu
+2. Saat create/edit stream (Single atau Playlist), pilih audio dari dropdown **Audio overlay**
+3. Set **Volume overlay** (0.0 - 1.0, default 0.3 = 30%)
+4. Start stream
+
+**Mode otomatis:**
+- Video punya audio track → mix kedua audio (video full volume + overlay configurable)
+- Video silent → overlay jadi satu-satunya audio
+
+**Teknis:**
+- Kolom: `streams.audio_id` (FK ke `audio_tracks`), `streams.audio_volume` (default '0.3')
+- FFmpeg args: tambah `-stream_loop -1 -i <audio>` sebagai input ke-2
+- Filter `amix=inputs=2:duration=first` kalau video has_audio, atau langsung `[1:a]volume=<vol>` kalau silent
+- `videos.has_audio` di-cache saat upload/probe — tidak perlu probe sync setiap stream start
+- Audio di-loop independen dari video
+
+**Differences dengan Loop tool:**
+- **Streaming overlay** = real-time, tidak bikin file output baru
+- **Loop tool** = bikin file video panjang yang sudah di-mix (siap upload/distribute)
+
+---
+
 ### Auto-Retry + Health Check
 
 **Apa:** Recovery otomatis untuk stream yang crash atau stale.
@@ -443,6 +614,100 @@ pending → started → done | error
 
 ---
 
+## YouTube Upload
+
+**Apa:** Upload video langsung ke YouTube dari AwanStream tanpa harus download dulu ke PC. Sangat berguna kalau AwanStream di-deploy di VPS dengan bandwidth besar — file 30 GB selesai dalam menit, bukan jam.
+
+### Connect (OAuth)
+
+**Cara pakai:**
+1. Setup Google Cloud project + OAuth credentials (lihat `docs/youtube-setup.md`)
+2. Tambahkan ke `.env`:
+   ```env
+   YOUTUBE_CLIENT_ID=...
+   YOUTUBE_CLIENT_SECRET=...
+   YOUTUBE_REDIRECT_URI=http://localhost:7575/youtube/callback
+   ```
+3. Restart AwanStream
+4. Buka `/youtube` (sidebar: YouTube)
+5. Klik **Connect YouTube** → redirect ke Google consent screen
+6. Login + setujui akses (upload + read channel info)
+7. Status berubah jadi **Connected** dengan channel name
+
+**Teknis:**
+- Tabel: `youtube_accounts` (channel_id, channel_title, access_token, refresh_token, expiry_date, scope)
+- Single-account model — connect satu kali, semua upload pakai akun itu
+- Refresh token auto-update via googleapis `oauth2.on('tokens')` event
+- Disconnect tombol revoke token di Google + clear DB row
+
+### Upload video
+
+**Cara pakai:**
+1. Di video library, klik tombol YouTube (icon biru) di row video status `ready`
+2. Modal terbuka dengan form:
+   - **Title** — default dari `videos.title`, max 100 karakter
+   - **Privacy** — Unlisted (default, recommended) / Private / Public
+   - **Category** — Music (default), People & Blogs, Entertainment, Gaming, Education, Science & Tech
+3. Klik **Start upload**
+4. Progress bar real-time + bytes sent/total + percent + status
+5. Setelah selesai → 2 tombol:
+   - **Open in YouTube Studio** — edit metadata + publish manual
+   - **View on YouTube** — buka video page
+
+**Default behavior:**
+- Privacy: **Unlisted** — supaya kamu bisa cek hasil dulu sebelum public
+- Description: empty (edit di Studio)
+- Tags: empty (edit di Studio)
+- Notify subscribers: **false**
+- Made for kids: **false**
+
+**Teknis:**
+- Tabel: `youtube_uploads` (video_id, youtube_video_id, title, privacy, category_id, status, bytes_sent, total_bytes, percent, last_error, started_at, finished_at)
+- Status state machine: `pending → uploading → done | error | cancelled`
+- Module: `src/youtubeUploader.js`
+- Resumable upload via googleapis `youtube.videos.insert` — handle chunked transfer + auto-retry transparently
+- Cancel via `AbortController` signal
+- Log per upload: `logs/youtube-upload-<id>.log`
+- Reconcile on boot: stale `pending`/`uploading` rows → `error` ("upload interrupted by server restart")
+
+### Resume modal
+
+**Apa:** Kalau modal di-close mid-upload, klik icon biru YouTube di video row akan re-open modal dan resume polling progress. Server upload tetap jalan independen dari modal.
+
+**Cara pakai:**
+1. Mulai upload, modal close
+2. Di video row, icon YouTube biru dengan badge percent muncul (auto-refresh tiap 3 detik)
+3. **Klik icon biru itu** → modal terbuka kembali
+4. Polling progress resume otomatis dari job aktif
+
+**Teknis:**
+- Button uploading punya `data-yt-watch-job` (untuk badge auto-update) + `data-yt-resume-job` (untuk click handler)
+- Click handler set `resumeMode = true`, skip form, langsung tampilkan progress view
+- `resumeMode` di-check di submit handler — kalau true, return early supaya tidak start upload baru
+
+**Limitasi sekarang:**
+- Job hilang dari memory 30 detik setelah selesai → klik icon setelah itu reload page
+- Server restart mid-upload → status `error`, harus mulai dari awal (no resume across restarts)
+- Cuma visible di halaman `/videos` — kalau navigate ke halaman lain tidak ada indicator
+
+**Endpoints:**
+- `GET /youtube` — status page (3 states: not-configured / not-connected / connected)
+- `GET /youtube/connect` — redirect ke Google consent
+- `GET /youtube/callback` — OAuth callback handler
+- `POST /youtube/disconnect` — revoke + clear DB
+- `POST /youtube/upload/:videoId` — start upload (return JSON kalau Accept: application/json)
+- `GET /youtube/upload/:jobId/progress` — JSON polling
+- `POST /youtube/upload/:jobId/cancel` — abort
+- `GET /youtube/uploads/active` — list active jobs
+
+**Quota:**
+- Default: 10,000 units/hari per Google Cloud project
+- Upload video = ~1,600 units → max **6 video/hari**
+- Reset jam 00:00 Pacific Time (= 15:00 WIB)
+- Request quota increase di Google Cloud Console kalau perlu
+
+---
+
 ## Dashboard & System Monitor
 
 **Apa:** Overview app + real-time CPU/RAM/Uptime di dashboard.
@@ -484,6 +749,39 @@ pending → started → done | error
 - IP diambil dari `x-forwarded-for` kalau ada, fallback ke `req.ip`
 
 **File:** `app.js` (setelah `express.urlencoded`, sebelum `express.static`)
+
+---
+
+## Security: protected media serving
+
+**Apa:** File di `public/uploads/` (video, audio, thumbnail) **tidak di-expose** via static middleware. Semua akses lewat protected route yang require session auth.
+
+**Sebelum (legacy, ada di pre-release):**
+```
+GET /uploads/1778503421404_Fireplace.mp4 → file served, NO AUTH
+GET /uploads/thumbs/thumb_42.jpg → image served, NO AUTH
+```
+
+Siapa pun dengan URL bisa download video/thumbnail tanpa login. Risk leak.
+
+**Sekarang:**
+```
+app.use('/css', express.static('public/css'))  // hanya CSS yang public
+// public/uploads/ tidak di-serve sebagai static
+```
+
+Akses video/audio/thumbnail lewat protected route:
+- `GET /videos/:id/file` — stream video untuk HTML5 player (support HTTP Range)
+- `GET /videos/:id/download` — download dengan filename friendly
+- `GET /videos/:id/thumb` — thumbnail image (cache 60s)
+- `GET /videos/:id/thumb/download` — download thumbnail JPEG
+- `GET /audio/:id/download` — download audio dengan filename friendly
+
+**Semua route ini di-mount via `requireAuth` middleware**, jadi unauthenticated request dapat 401 (JSON) atau redirect ke /login (HTML).
+
+**Catatan untuk view:**
+- ❌ JANGAN: `<img src="/uploads/thumbs/thumb_42.jpg">`
+- ✅ DO: `<img src="/videos/42/thumb">`
 
 ---
 

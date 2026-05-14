@@ -1,0 +1,95 @@
+<%- include('partials/header', {
+  title: 'YouTube',
+  activeNav: 'youtube',
+  pageTitle: 'YouTube',
+  pageSubtitle: 'Hubungkan akun YouTube untuk upload video langsung dari AwanStream.',
+}) %>
+<%- include('partials/flash', { error, notice }) %>
+
+<% if (!configured) { %>
+  <div class="card">
+    <div class="alert alert-error" style="margin-bottom:16px;">
+      <strong>OAuth credentials belum diset.</strong>
+    </div>
+    <p>Untuk pakai fitur YouTube upload, kamu perlu OAuth credentials dari Google Cloud Console.</p>
+
+    <h3 style="margin-top:18px;">Setup steps</h3>
+    <ol style="line-height:1.8;">
+      <li>Buka <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">Google Cloud Console</a></li>
+      <li>Buat project baru (atau pakai yang sudah ada)</li>
+      <li>Aktifkan <strong>YouTube Data API v3</strong> di "APIs &amp; Services → Library"</li>
+      <li>Buat OAuth credentials di "APIs &amp; Services → Credentials → Create credentials → OAuth client ID"
+        <ul>
+          <li>Application type: <strong>Web application</strong></li>
+          <li>Authorized redirect URI: <code class="inline-code"><%= (process.env.YOUTUBE_REDIRECT_URI_HINT || 'http://localhost:7575/youtube/callback') %></code></li>
+        </ul>
+      </li>
+      <li>Copy Client ID + Client Secret</li>
+      <li>Tambahkan ke file <code class="inline-code">.env</code>:
+<pre class="log-box" style="margin-top:6px;">YOUTUBE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+YOUTUBE_CLIENT_SECRET=GOCSPX-your-secret
+YOUTUBE_REDIRECT_URI=http://localhost:7575/youtube/callback</pre>
+      </li>
+      <li>Restart AwanStream</li>
+      <li>Refresh halaman ini, lalu klik <strong>Connect YouTube</strong></li>
+    </ol>
+
+    <p class="muted small" style="margin-top:14px;">
+      Detail lengkap: <a href="https://developers.google.com/youtube/v3/quickstart/nodejs" target="_blank" rel="noopener">YouTube API quickstart</a> ·
+      <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">Credentials page</a>
+    </p>
+  </div>
+
+<% } else if (!status.connected) { %>
+
+  <div class="card">
+    <h3 style="margin-top:0;">Belum terhubung</h3>
+    <p class="muted">OAuth credentials sudah diset. Sekarang sambungkan akun YouTube kamu untuk mulai upload.</p>
+    <p style="margin-top:18px;">
+      <a href="/youtube/connect" class="btn btn-primary">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:-2px;margin-right:6px;"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+        Connect YouTube
+      </a>
+    </p>
+    <p class="small muted" style="margin-top:18px;">
+      Kamu akan diarahkan ke halaman consent Google. Pilih akun yang mau dipakai untuk upload, dan setujui akses (upload &amp; read channel info).
+    </p>
+  </div>
+
+<% } else { %>
+
+  <div class="card">
+    <h3 style="margin-top:0; display:flex; align-items:center; gap:8px;">
+      <span class="status-dot status-dot-running" style="width:10px; height:10px; border-radius:50%; background:#22c55e; display:inline-block;"></span>
+      Connected
+    </h3>
+    <table class="table" style="margin-top:14px;">
+      <tbody>
+        <tr><th style="width:200px;">Channel</th><td><strong><%= status.channelTitle || '(unknown)' %></strong></td></tr>
+        <% if (status.channelId) { %>
+          <tr><th>Channel ID</th><td><code class="inline-code"><%= status.channelId %></code></td></tr>
+          <tr><th>Channel page</th><td>
+            <a href="https://www.youtube.com/channel/<%= status.channelId %>" target="_blank" rel="noopener">
+              youtube.com/channel/<%= status.channelId %>
+            </a>
+          </td></tr>
+        <% } %>
+        <tr><th>Connected since</th><td><%= formatTime(status.connectedAt) %></td></tr>
+      </tbody>
+    </table>
+
+    <div class="alert alert-info" style="margin-top:18px;">
+      <strong>Phase 1:</strong> Account terhubung. Upload feature menyusul di Phase 2 — tombol "Upload to YouTube" akan muncul di video library.
+    </div>
+
+    <form method="POST" action="/youtube/disconnect" class="inline" style="margin-top:14px;"
+          data-confirm="Putuskan koneksi akun YouTube? Token akan di-revoke di Google. Kamu bisa connect lagi kapan saja."
+          data-confirm-title="Disconnect YouTube"
+          data-confirm-action="Disconnect">
+      <button type="submit" class="btn btn-danger">Disconnect</button>
+    </form>
+  </div>
+
+<% } %>
+
+<%- include('partials/footer') %>

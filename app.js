@@ -13,6 +13,8 @@ const downloader = require('./src/downloader');
 const scheduler = require('./src/scheduler');
 const looper = require('./src/looper');
 const audioManager = require('./src/audioManager');
+const youtubeManager = require('./src/youtubeManager');
+const youtubeUploader = require('./src/youtubeUploader');
 const { requireAuth, injectUser } = require('./src/auth');
 
 const authRoutes = require('./src/routes/auth');
@@ -23,6 +25,7 @@ const playlistRoutes = require('./src/routes/playlists');
 const historyRoutes = require('./src/routes/history');
 const looperRoutes = require('./src/routes/looper');
 const audioRoutes = require('./src/routes/audio');
+const youtubeRoutes = require('./src/routes/youtube');
 
 ensureSchema();
 streamManager.reconcileOnBoot();
@@ -31,6 +34,8 @@ downloader.reconcileOnBoot();
 scheduler.reconcileOnBoot();
 looper.reconcileOnBoot();
 audioManager.reconcileOnBoot();
+youtubeManager.reconcileOnBoot();
+youtubeUploader.reconcileOnBoot();
 scheduler.start();
 
 const app = express();
@@ -415,6 +420,7 @@ app.use('/playlists', requireAuth, playlistRoutes);
 app.use('/history', requireAuth, historyRoutes);
 app.use('/looper', requireAuth, looperRoutes);
 app.use('/audio', requireAuth, audioRoutes);
+app.use('/youtube', requireAuth, youtubeRoutes);
 
 app.use((err, req, res, _next) => {
   console.error(err);

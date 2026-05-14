@@ -109,6 +109,37 @@ function ensureSchema() {
       last_error TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS youtube_accounts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      channel_id TEXT,                  -- YouTube channel ID (UC...)
+      channel_title TEXT,               -- channel display name
+      access_token TEXT,                -- short-lived (1 hour)
+      refresh_token TEXT NOT NULL,      -- long-lived, used to get new access_token
+      token_type TEXT DEFAULT 'Bearer',
+      scope TEXT,                       -- granted scopes
+      expiry_date INTEGER,              -- unix ms timestamp when access_token expires
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS youtube_uploads (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      video_id INTEGER NOT NULL,
+      youtube_video_id TEXT,            -- populated after upload completes
+      title TEXT,                       -- title used at upload time
+      privacy TEXT DEFAULT 'unlisted',  -- private | unlisted | public
+      category_id TEXT DEFAULT '10',    -- 10 = Music
+      status TEXT DEFAULT 'pending',    -- pending | uploading | done | error | cancelled
+      bytes_sent INTEGER DEFAULT 0,
+      total_bytes INTEGER DEFAULT 0,
+      percent INTEGER DEFAULT 0,
+      last_error TEXT,
+      started_at DATETIME,
+      finished_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
+    );
   `);
 
   // Lightweight migrations: add encode-related columns to existing installs.

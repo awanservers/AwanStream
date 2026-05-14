@@ -110,6 +110,40 @@ JSON endpoints untuk polling:
 - `reconcileOnBoot()` → row `started` stale dianggap tidak reliable setelah restart, di-set ke `error` dengan pesan eksplisit.
 - Polling 15 detik = akurasi trigger maksimal 15 detik di belakang target (cukup untuk streaming, bukan HFT).
 
+### `src/looper.js` (Loop tool)
+- State: `jobs: Map<jobId, jobState>` (in-memory). Job ID pakai `Date.now()` (tidak reset setelah restart).
+- `start(sourceVideoId, targetSeconds, title, options)`:
+  - Optional audio overlay (`audioId`, `audioVolume`, `audioMode`)
+  - Insert row `videos` baru dengan `status='transcoding'`, `loop_job_id` set
+  - Smooth mode → 2-phase pipeline (seamless unit + loop dengan -c copy)
+  - Fast mode → single pass `-stream_loop -1 -c copy`
+- Audio overlay di phase 2: tambah input ke-2 (audio file), filter `amix=inputs=2:duration=first` atau `[1:a]volume=<vol>` (replace mode)
+- On success: `videos.status='ready'`, generate thumbnail, log file persist di `logs/loop-<jobId>.log`
+
+### `src/audioManager.js` (Audio Library)
+- State: tabel `audio_tracks` (separate dari videos)
+- Storage: `public/uploads/audio/` (terpisah dari `public/uploads/`)
+- `register({ title, filename, size })` — insert row + probe async via `setImmediate()`
+- `getFilePath(audioId)` — resolve path untuk konsumer (streamManager, looper, scheduler)
+- `remove(audioId)` — guard against running streams, null out FK references
+- Probe metadata: codec, duration, bitrate, sample rate, channels (mono/stereo)
+
+### `src/youtubeManager.js` (YouTube OAuth)
+- State: tabel `youtube_accounts` (single-row model)
+- OAuth credentials (Client ID + Secret) dari env (`.env`), bukan DB — itu app-level secret
+- User tokens (access + refresh) di DB
+- Auto-refresh transparently via googleapis `oauth2.on('tokens')` event handler — persist refreshed tokens kembali ke DB
+- Scopes: `youtube.upload` + `youtube.readonly`
+
+### `src/youtubeUploader.js` (YouTube Upload)
+- State: `jobs: Map<jobId, { jobState, abortController, logStream }>` + tabel `youtube_uploads`
+- `start(videoId, options)` — fire-and-forget, return jobId. Upload jalan async.
+- Resumable upload via googleapis `youtube.videos.insert({ media: { body: fs.createReadStream(...) } })` — library handle chunked transfer + auto-retry transparently
+- AbortController untuk cancel mid-upload
+- Progress via `onUploadProgress` callback, persist ke DB tiap 5%
+- On success: row update `status='done'`, `youtube_video_id` set
+- Reconcile on boot: stale `pending`/`uploading` → `error`
+
 ### `src/auth.js`
 - `requireAuth` — cek `req.session.userId`, kalau tidak ada: redirect `/login` (HTML) atau 401 JSON
 - `injectUser` — isi `res.locals.currentUser` biar view bisa conditional
@@ -194,7 +228,34 @@ stream_history (
   status TEXT DEFAULT 'completed',   -- completed | error
   last_error, created_at
 )
+
+audio_tracks (
+  id, title, filename, size_bytes,
+  duration_seconds, codec, bitrate,
+  sample_rate, channels,
+  status TEXT DEFAULT 'uploaded',    -- uploaded | error
+  last_error, created_at
+)
+
+youtube_accounts (
+  id, channel_id, channel_title,
+  access_token, refresh_token,        -- secrets, never expose
+  token_type, scope, expiry_date,
+  created_at, updated_at
+)
+
+youtube_uploads (
+  id, video_id FK,
+  youtube_video_id,                   -- set after upload completes
+  title, privacy, category_id,
+  status TEXT DEFAULT 'pending',      -- pending | uploading | done | error | cancelled
+  bytes_sent, total_bytes, percent,
+  last_error, started_at, finished_at, created_at
+)
 ```
+
+Kolom tambahan di tabel `streams`: `audio_id` (FK ke `audio_tracks`), `audio_volume` (TEXT, default '0.3').
+Kolom tambahan di tabel `videos`: `loop_job_id` (TEXT), `has_audio` (INTEGER 0/1, cached dari probe).
 
 ### Time storage convention
 
@@ -243,26 +304,50 @@ Perbedaan penting:
 - Setelah `started`, cancel tidak tersedia — user harus Stop stream-nya manual atau tunggu `stop_at`.
 - `error` adalah terminal (scheduler tidak retry); user harus buat schedule baru.
 
+### YouTube Upload
+```
+(new row) → pending
+pending    --start upload→       uploading
+uploading  --complete→           done (youtube_video_id set)
+uploading  --error→              error (last_error set)
+uploading  --user cancel→        cancelled
+pending    --server restart→     error (via reconcileOnBoot)
+uploading  --server restart→     error (via reconcileOnBoot)
+```
+
+### Audio Track
+```
+(new row after upload) → uploaded
+uploaded   --probe finds no audio stream→  error
+```
+
 ## Routing & sub-menu structure
 
 ```
 /                       Dashboard (stats + system monitor)
 /login                  Login form
 /logout                 Destroy session
-/videos                 Video Library (upload, import, prepare, delete)
+/videos                 Video Library (upload, import, prepare, download, delete)
+/audio                  Audio Library (upload, rename, download, delete)
 /playlists              Playlist list (create, delete)
 /playlists/:id          Playlist detail (add/remove/reorder videos)
-/streams/single         Single Video streams (create, start, stop, delete)
-/streams/playlist       Playlist streams (create, start, stop, delete)
+/streams/single         Single Stream (create, start, stop, delete)
+/streams/playlist       Playlist Stream (create, start, stop, delete)
 /schedules              Scheduled streaming (create, cancel, delete)
+/history                Stream history (list, delete, clear)
+/looper                 Loop tool (loop video + audio overlay)
+/audio                  Audio Library (upload, rename, download, delete)
+/youtube                YouTube OAuth + upload
 /api/system             System monitor JSON (polled by dashboard)
+/api/events             SSE real-time system stats
 ```
 
 Sidebar nav groups:
 - **Dashboard** → `/`
-- **Videos** (sub-menu): Library → `/videos`, Playlists → `/playlists`
-- **Streams** (sub-menu): Single Video → `/streams/single`, Playlist → `/streams/playlist`
-- **Schedules** → `/schedules`
+- **Library** (parent): Videos → `/videos`, Audio → `/audio`, Playlists → `/playlists`
+- **Streams** (parent): Single Stream → `/streams/single`, Playlist Stream → `/streams/playlist`, Schedules → `/schedules`, History → `/history`
+- **Loop** → `/looper`
+- **YouTube** → `/youtube`
 
 ## Security boundaries
 
