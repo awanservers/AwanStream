@@ -12,6 +12,7 @@ const transcoder = require('./src/transcoder');
 const downloader = require('./src/downloader');
 const scheduler = require('./src/scheduler');
 const looper = require('./src/looper');
+const audioManager = require('./src/audioManager');
 const { requireAuth, injectUser } = require('./src/auth');
 
 const authRoutes = require('./src/routes/auth');
@@ -21,6 +22,7 @@ const scheduleRoutes = require('./src/routes/schedules');
 const playlistRoutes = require('./src/routes/playlists');
 const historyRoutes = require('./src/routes/history');
 const looperRoutes = require('./src/routes/looper');
+const audioRoutes = require('./src/routes/audio');
 
 ensureSchema();
 streamManager.reconcileOnBoot();
@@ -28,6 +30,7 @@ transcoder.reconcileOnBoot();
 downloader.reconcileOnBoot();
 scheduler.reconcileOnBoot();
 looper.reconcileOnBoot();
+audioManager.reconcileOnBoot();
 scheduler.start();
 
 const app = express();
@@ -85,7 +88,11 @@ app.use(express.urlencoded({ extended: true }));
   }));
 })();
 
-app.use(express.static(path.join(__dirname, 'public')));
+// Serve CSS/JS assets publicly (no auth needed for styling).
+// NOTE: we deliberately do NOT serve `public/uploads` via static middleware.
+// Uploads (videos, thumbnails, audio) require authentication — accessed via
+// protected routes like /videos/:id/file, /videos/:id/thumb, /audio/:id/download.
+app.use('/css', express.static(path.join(__dirname, 'public', 'css')));
 
 const dbDir = path.join(__dirname, 'db');
 if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
@@ -407,6 +414,7 @@ app.use('/schedules', requireAuth, scheduleRoutes);
 app.use('/playlists', requireAuth, playlistRoutes);
 app.use('/history', requireAuth, historyRoutes);
 app.use('/looper', requireAuth, looperRoutes);
+app.use('/audio', requireAuth, audioRoutes);
 
 app.use((err, req, res, _next) => {
   console.error(err);

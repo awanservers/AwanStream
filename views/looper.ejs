@@ -71,6 +71,36 @@
           </span>
         </label>
 
+        <div class="full" style="padding:12px; background:var(--panel); border:1px solid var(--border); border-radius:8px;">
+          <strong>Audio overlay <span class="muted small">(opsional — tambah musik background)</span></strong>
+          <div class="small muted" style="margin:3px 0 10px;">
+            Cocok untuk video pendek (misal fireplace 8 detik) yang mau jadi video panjang dengan musik jazz. Audio akan di-loop otomatis sampai match target durasi.
+          </div>
+          <div class="grid-2" style="gap:10px;">
+            <label class="full">Audio track
+              <select name="audio_id" id="audio_id">
+                <option value="">— Tanpa audio overlay —</option>
+                <% if (typeof audioTracks !== 'undefined' && audioTracks.length > 0) { %>
+                  <% audioTracks.forEach(a => { %>
+                    <option value="<%= a.id %>"><%= a.title %><% if (a.duration_seconds) { %> — <%= Math.floor(a.duration_seconds/60) %>m <%= Math.round(a.duration_seconds%60) %>s<% } %></option>
+                  <% }) %>
+                <% } else { %>
+                  <option value="" disabled>Belum ada audio. Upload di /audio dulu.</option>
+                <% } %>
+              </select>
+            </label>
+            <label>Mode
+              <select name="audio_mode" id="audio_mode">
+                <option value="mix" selected>Mix (gabung dengan suara video)</option>
+                <option value="replace">Replace (ganti total suara video)</option>
+              </select>
+            </label>
+            <label>Volume overlay <span class="muted small">(0.0 - 1.0)</span>
+              <input type="number" name="audio_volume" value="0.3" min="0" max="1" step="0.1" style="max-width:100px;">
+            </label>
+          </div>
+        </div>
+
         <div class="full" id="estimate-row" style="display:none;">
           <div class="alert alert-info" id="estimate-box"></div>
         </div>
@@ -133,6 +163,8 @@
                       data-confirm-action="Cancel job">
                   <button type="submit" class="btn btn-danger">Cancel</button>
                 </form>
+                <button type="button" class="btn btn-icon" title="View Log"
+                        onclick="openLoopLog('<%= j.jobId %>')">📄</button>
               </td>
             </tr>
           <% }) %>
@@ -141,6 +173,86 @@
     </div>
   <% } %>
 </div>
+
+<% if (typeof recentErrors !== 'undefined' && recentErrors && recentErrors.length > 0) { %>
+<h2 style="margin-top:28px; margin-bottom:12px;">Recent errors</h2>
+<div class="table-wrap card card-flush">
+  <table class="table">
+    <thead><tr>
+      <th>Video</th>
+      <th>Error</th>
+      <th>Time</th>
+      <th>Log</th>
+    </tr></thead>
+    <tbody>
+      <% recentErrors.forEach(v => { %>
+        <tr>
+          <td class="small"><%= v.title %></td>
+          <td class="small" style="color:var(--danger);"><%= v.last_error || '-' %></td>
+          <td class="small muted"><%= formatTime(v.created_at) %></td>
+          <td>
+            <% if (v.loop_job_id) { %>
+              <button type="button" class="btn btn-icon" title="View Log"
+                      onclick="openLoopLog('<%= v.loop_job_id %>')">📄</button>
+            <% } else { %>
+              -
+            <% } %>
+          </td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</div>
+<% } %>
+
+<!-- Loop Log Modal -->
+<dialog id="loop-log-modal" class="modal" style="width:min(90vw,800px); max-height:80vh;">
+  <header class="modal-header">
+    <h3 id="loop-log-title">Loop Job Log</h3>
+    <button data-close-modal class="btn-close" aria-label="Close">&times;</button>
+  </header>
+  <div class="modal-body" style="padding:0;">
+    <pre id="loop-log-content" style="background:var(--bg); color:var(--text); padding:16px; margin:0; overflow:auto; max-height:60vh; font-size:12px; line-height:1.5; white-space:pre-wrap; word-break:break-all;"></pre>
+  </div>
+  <footer class="modal-footer">
+    <button type="button" id="loop-log-refresh" class="btn">Refresh</button>
+    <button type="button" data-close-modal class="btn btn-primary">Close</button>
+  </footer>
+</dialog>
+
+<script>
+// Loop log modal handler
+let currentLogUrl = null;
+function openLoopLog(jobId) {
+  currentLogUrl = '/looper/' + jobId + '/log';
+  document.getElementById('loop-log-title').textContent = 'Loop Job #' + jobId + ' — Log';
+  fetchLoopLog();
+  document.getElementById('loop-log-modal').showModal();
+}
+function openLoopLogByVideo(videoId) {
+  currentLogUrl = '/looper/video/' + videoId + '/log';
+  document.getElementById('loop-log-title').textContent = 'Loop Log (Video #' + videoId + ')';
+  fetchLoopLog();
+  document.getElementById('loop-log-modal').showModal();
+}
+async function fetchLoopLog() {
+  const el = document.getElementById('loop-log-content');
+  try {
+    const r = await fetch(currentLogUrl, { cache: 'no-store' });
+    el.textContent = r.ok ? await r.text() : 'Log not found.';
+    el.scrollTop = el.scrollHeight;
+  } catch (e) {
+    el.textContent = 'Error fetching log: ' + e.message;
+  }
+}
+document.getElementById('loop-log-refresh').addEventListener('click', fetchLoopLog);
+document.getElementById('loop-log-modal').addEventListener('click', function(e) {
+  if (e.target === this) this.close();
+});
+document.querySelectorAll('#loop-log-modal [data-close-modal]').forEach(btn => {
+  btn.addEventListener('click', () => document.getElementById('loop-log-modal').close());
+});
+</script>
 
 <script>
 (function() {

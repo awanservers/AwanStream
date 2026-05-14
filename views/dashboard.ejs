@@ -216,8 +216,8 @@
         <% recentStreams.forEach(s => { %>
           <tr>
             <td class="col-thumb">
-              <% if (s.video_thumb) { %>
-                <img src="/uploads/thumbs/<%= s.video_thumb %>" alt="" class="video-thumb" loading="lazy" style="width:140px;height:79px">
+              <% if (s.video_thumb && s.video_id) { %>
+                <img src="/videos/<%= s.video_id %>/thumb" alt="" class="video-thumb" loading="lazy" style="width:140px;height:79px">
               <% } else { %>
                 <div class="video-thumb video-thumb-empty" style="width:140px;height:79px;cursor:default">
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="14" height="14" rx="2"/><path d="M22 7l-6 5 6 5V7z"/></svg>

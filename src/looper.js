@@ -20,6 +20,7 @@ const path = require('path');
 const fs = require('fs');
 const { db } = require('./db');
 const transcoder = require('./transcoder');
+const audioManager = require('./audioManager');
 
 const uploadDir = path.join(__dirname, '..', 'public', 'uploads');
 const logsDir = path.join(__dirname, '..', 'logs');
@@ -36,7 +37,7 @@ if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
 //   cancelRequested: bool,
 // }
 const jobs = new Map();
-let nextJobId = 1;
+let nextJobId = Date.now();
 
 // Parse "HH:MM:SS.xx" → seconds (float).
 function parseTime(s) {
@@ -97,6 +98,9 @@ function getProgress(jobId) {
  * @param {object}  [options]
  * @param {boolean} [options.smooth=true]        Enable crossfade seamless loop.
  * @param {number}  [options.crossfadeSeconds=1] Crossfade duration (smooth only).
+ * @param {number}  [options.audioId]            Optional audio track id to overlay.
+ * @param {number}  [options.audioVolume=0.3]    Volume of overlay audio (mix mode).
+ * @param {string}  [options.audioMode='mix']    'mix' (preserve video audio) or 'replace'.
  * @returns {{ jobId: string, outputVideoId: number, outputFilename: string, mode: string }}
  */
 function start(sourceVideoId, targetSeconds, title, options = {}) {
@@ -133,6 +137,20 @@ function start(sourceVideoId, targetSeconds, title, options = {}) {
   let crossfadeSec = Number(options.crossfadeSeconds);
   if (!Number.isFinite(crossfadeSec) || crossfadeSec <= 0) crossfadeSec = 1.0;
 
+  // Resolve optional audio overlay.
+  let audioPath = null;
+  let audioVolume = '0.3';
+  let audioMode = 'mix'; // 'mix' = preserve video audio + overlay; 'replace' = overlay only
+  if (options.audioId) {
+    audioPath = audioManager.getFilePath(options.audioId);
+    if (!audioPath) {
+      throw new Error('Audio track not found or file missing on disk');
+    }
+    const vol = parseFloat(options.audioVolume);
+    if (Number.isFinite(vol) && vol >= 0 && vol <= 2) audioVolume = String(vol);
+    if (options.audioMode === 'replace') audioMode = 'replace';
+  }
+
   // Smooth needs L > 2*D (some tail, some head, some middle). If not, shrink D
   // to fit, or reject if still too short.
   if (smooth) {
@@ -157,10 +175,12 @@ function start(sourceVideoId, targetSeconds, title, options = {}) {
     `${src.title} (${modeLabel} ${formatTargetLabel(target)})`;
   const finalTitle = uniqueVideoTitle(baseTitle);
 
+  const jobId = String(nextJobId++);
+
   const insert = db.prepare(`INSERT INTO videos
     (title, filename, size_bytes, duration_seconds, status, folder_id,
-     src_width, src_height, src_fps)
-    VALUES (?, ?, 0, ?, 'transcoding', ?, ?, ?, ?)`);
+     src_width, src_height, src_fps, loop_job_id)
+    VALUES (?, ?, 0, ?, 'transcoding', ?, ?, ?, ?, ?)`);
   const result = insert.run(
     finalTitle,
     outFilename,
@@ -168,14 +188,13 @@ function start(sourceVideoId, targetSeconds, title, options = {}) {
     src.folder_id || null,
     src.src_width || null,
     src.src_height || null,
-    src.src_fps || null
+    src.src_fps || null,
+    jobId
   );
   const outputVideoId = Number(result.lastInsertRowid);
-
-  const jobId = String(nextJobId++);
   const logPath = path.join(logsDir, `loop-${jobId}.log`);
   const logStream = fs.createWriteStream(logPath, { flags: 'a' });
-  logStream.write(`\n=== ${new Date().toISOString()} starting loop job=${jobId} mode=${smooth ? 'smooth' : 'fast'} src=${src.id} L=${srcDuration.toFixed(2)}s target=${target}s crossfade=${crossfadeSec}s\n`);
+  logStream.write(`\n=== ${new Date().toISOString()} starting loop job=${jobId} mode=${smooth ? 'smooth' : 'fast'} src=${src.id} L=${srcDuration.toFixed(2)}s target=${target}s crossfade=${crossfadeSec}s audio=${audioPath ? `${options.audioId} (${audioMode}, vol=${audioVolume})` : 'none'}\n`);
 
   const jobState = {
     mode: smooth ? 'smooth' : 'fast',
@@ -207,6 +226,9 @@ function start(sourceVideoId, targetSeconds, title, options = {}) {
     outputVideoId,
     logStream,
     jobState,
+    audioPath,
+    audioVolume,
+    audioMode,
   };
 
   if (smooth) {
@@ -223,20 +245,59 @@ function start(sourceVideoId, targetSeconds, title, options = {}) {
 // ---------------------------------------------------------------------------
 
 function runFastPhase(ctx) {
-  const { srcPath, target, outPath, outputVideoId, logStream, jobState, jobId } = ctx;
+  const { srcPath, target, outPath, outputVideoId, logStream, jobState, jobId,
+          audioPath, audioVolume, audioMode } = ctx;
 
+  // When an audio overlay is attached, we must re-encode audio (amix filter),
+  // but video can still be copied. Otherwise plain `-c copy` is fastest.
   const args = [
     '-hide_banner', '-y',
     '-nostats',
     '-progress', 'pipe:1',
     '-stream_loop', '-1',
     '-i', srcPath,
-    '-c', 'copy',
-    '-map', '0:v:0', '-map', '0:a:0?',
+  ];
+
+  if (audioPath) {
+    args.push('-stream_loop', '-1', '-i', audioPath);
+  }
+
+  if (audioPath) {
+    // Check if source video has audio (cached or probe once).
+    const srcHasAudio = probeHasAudio(srcPath);
+
+    if (audioMode === 'replace' || !srcHasAudio) {
+      // Overlay becomes the only audio.
+      args.push(
+        '-filter_complex', `[1:a]volume=${audioVolume}[aout]`,
+        '-map', '0:v:0',
+        '-map', '[aout]',
+      );
+    } else {
+      // Mix video audio (full volume) + overlay (configurable volume).
+      args.push(
+        '-filter_complex',
+        `[0:a]volume=1.0[va];[1:a]volume=${audioVolume}[oa];[va][oa]amix=inputs=2:duration=first:dropout_transition=2[aout]`,
+        '-map', '0:v:0',
+        '-map', '[aout]',
+      );
+    }
+    args.push(
+      '-c:v', 'copy',
+      '-c:a', 'aac', '-b:a', '192k', '-ar', '44100', '-ac', '2',
+    );
+  } else {
+    args.push(
+      '-c', 'copy',
+      '-map', '0:v:0', '-map', '0:a:0?',
+    );
+  }
+
+  args.push(
     '-t', String(target),
     '-movflags', '+faststart',
     outPath,
-  ];
+  );
 
   logStream.write(`=== phase 1 (fast loop) cmd: ffmpeg ${args.join(' ')}\n`);
   const proc = spawnWithProgress(args, logStream, jobState, {
@@ -354,7 +415,8 @@ function runSmoothPhase1(ctx) {
 }
 
 function runSmoothPhase2(ctx) {
-  const { target, outPath, logStream, jobState, seamlessPath } = ctx;
+  const { target, outPath, logStream, jobState, seamlessPath,
+          audioPath, audioVolume, audioMode } = ctx;
 
   const args = [
     '-hide_banner', '-y',
@@ -362,12 +424,46 @@ function runSmoothPhase2(ctx) {
     '-progress', 'pipe:1',
     '-stream_loop', '-1',
     '-i', seamlessPath,
-    '-c', 'copy',
-    '-map', '0:v:0', '-map', '0:a:0?',
+  ];
+
+  if (audioPath) {
+    args.push('-stream_loop', '-1', '-i', audioPath);
+  }
+
+  if (audioPath) {
+    // Seamless unit may or may not have audio (depends on source). Check once.
+    const seamlessHasAudio = probeHasAudio(seamlessPath);
+
+    if (audioMode === 'replace' || !seamlessHasAudio) {
+      args.push(
+        '-filter_complex', `[1:a]volume=${audioVolume}[aout]`,
+        '-map', '0:v:0',
+        '-map', '[aout]',
+      );
+    } else {
+      args.push(
+        '-filter_complex',
+        `[0:a]volume=1.0[va];[1:a]volume=${audioVolume}[oa];[va][oa]amix=inputs=2:duration=first:dropout_transition=2[aout]`,
+        '-map', '0:v:0',
+        '-map', '[aout]',
+      );
+    }
+    args.push(
+      '-c:v', 'copy',
+      '-c:a', 'aac', '-b:a', '192k', '-ar', '44100', '-ac', '2',
+    );
+  } else {
+    args.push(
+      '-c', 'copy',
+      '-map', '0:v:0', '-map', '0:a:0?',
+    );
+  }
+
+  args.push(
     '-t', String(target),
     '-movflags', '+faststart',
     outPath,
-  ];
+  );
 
   logStream.write(`=== phase 2 (loop seamless unit) cmd: ffmpeg ${args.join(' ')}\n`);
 
@@ -540,6 +636,16 @@ function formatTargetLabel(seconds) {
     return (Number.isInteger(m) ? m : m.toFixed(1)) + 'm';
   }
   return seconds + 's';
+}
+
+// One-shot probe: does the file have an audio track? Uses transcoder.probeVideoInfo.
+function probeHasAudio(filePath) {
+  try {
+    const info = transcoder.probeVideoInfo(filePath);
+    return !!info.audioCodec;
+  } catch (_) {
+    return false;
+  }
 }
 
 module.exports = {

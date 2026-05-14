@@ -295,20 +295,31 @@ function tailLog(videoId, lines = 60) {
 
 /**
  * Generate a thumbnail image from a video file.
- * Extracts a frame at ~10% of the video duration (or 2s for short videos).
- * Saves as a 320px-wide JPEG in public/uploads/thumbs/.
- * Returns the filename (relative to thumbs/) or null on failure.
+ *
+ * @param {string}  videoPath - absolute path to the source video
+ * @param {number}  videoId   - video row id (used for output filename)
+ * @param {object}  [opts]
+ * @param {number}  [opts.atSecond] - explicit time in seconds to capture
+ *                                    the frame. If omitted, uses ~10% of
+ *                                    the duration (min 1s, max 30s).
+ * @returns {string|null} thumbnail filename (in thumbs/) or null on failure.
  */
-function generateThumbnail(videoPath, videoId) {
+function generateThumbnail(videoPath, videoId, opts = {}) {
   const { spawnSync } = require('child_process');
   const thumbsDir = path.join(__dirname, '..', 'public', 'uploads', 'thumbs');
   if (!fs.existsSync(thumbsDir)) fs.mkdirSync(thumbsDir, { recursive: true });
 
-  // Determine seek position: 10% of duration, min 1s, max 30s.
+  // Determine seek position:
+  //   - If opts.atSecond is given, clamp to [0, duration] and use it.
+  //   - Otherwise: 10% of duration, min 1s, max 30s.
   const duration = probeDuration(videoPath);
-  let seekSec = 2;
-  if (duration) {
+  let seekSec;
+  if (Number.isFinite(opts.atSecond) && opts.atSecond >= 0) {
+    seekSec = duration ? Math.min(opts.atSecond, Math.max(0, duration - 0.1)) : opts.atSecond;
+  } else if (duration) {
     seekSec = Math.max(1, Math.min(30, Math.round(duration * 0.1)));
+  } else {
+    seekSec = 2;
   }
 
   const thumbFilename = `thumb_${videoId}.jpg`;

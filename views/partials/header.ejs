@@ -23,7 +23,7 @@
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12l2-2 7-7 7 7 2 2"/><path d="M5 10v10h14V10"/></svg>
         Dashboard
       </a>
-      <a href="/videos" class="nav-item nav-parent <%= activePath === 'videos' || activePath === 'playlists' ? 'parent-active' : '' %>">
+      <a href="/videos" class="nav-item nav-parent <%= activePath === 'videos' || activePath === 'playlists' || activePath === 'audio' ? 'parent-active' : '' %>">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="14" height="14" rx="2"/><path d="M22 7l-6 5 6 5V7z"/></svg>
         Videos
       </a>
@@ -32,6 +32,9 @@
       </a>
       <a href="/playlists" class="nav-item nav-child <%= activePath === 'playlists' ? 'active' : '' %>">
         Playlists
+      </a>
+      <a href="/audio" class="nav-item nav-child <%= activePath === 'audio' ? 'active' : '' %>">
+        Audio
       </a>
       <a href="/streams" class="nav-item nav-parent <%= activePath === 'streams' || activePath === 'streams-playlist' ? 'parent-active' : '' %>">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12a7 7 0 0 1 14 0"/><path d="M2 12a10 10 0 0 1 20 0"/><circle cx="12" cy="12" r="2"/></svg>

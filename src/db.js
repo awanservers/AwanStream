@@ -94,6 +94,21 @@ function ensureSchema() {
       name TEXT NOT NULL,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS audio_tracks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      filename TEXT NOT NULL,
+      size_bytes INTEGER NOT NULL DEFAULT 0,
+      duration_seconds REAL,
+      codec TEXT,                       -- aac | mp3 | opus | ...
+      bitrate INTEGER,                  -- bits per second
+      sample_rate INTEGER,              -- Hz
+      channels INTEGER,                 -- 1 = mono, 2 = stereo
+      status TEXT NOT NULL DEFAULT 'uploaded', -- uploaded | downloading | error
+      last_error TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
   `);
 
   // Lightweight migrations: add encode-related columns to existing installs.
@@ -108,6 +123,8 @@ function ensureSchema() {
   add('keyframe_interval', 'INTEGER NOT NULL', '2');
   add('preset', 'TEXT', "'veryfast'");
   add('playlist_id', 'INTEGER', 'NULL');
+  add('audio_id', 'INTEGER', 'NULL');
+  add('audio_volume', 'TEXT', "'0.3'");
 
   const vcols = db.prepare('PRAGMA table_info(videos)').all().map((c) => c.name);
   const addv = (name, type, def) => {
@@ -125,12 +142,24 @@ function ensureSchema() {
   addv('src_fps', 'REAL', 'NULL');
   addv('folder_id', 'INTEGER', 'NULL');
   addv('thumbnail', 'TEXT', 'NULL');
+  addv('loop_job_id', 'TEXT', 'NULL');
+  addv('has_audio', 'INTEGER', 'NULL');
 
   // Playlist migrations.
   const pcols = db.prepare('PRAGMA table_info(playlists)').all().map((c) => c.name);
   if (!pcols.includes('shuffle')) {
     db.exec(`ALTER TABLE playlists ADD COLUMN shuffle INTEGER NOT NULL DEFAULT 0`);
   }
+
+  // One-time cleanup: streams.audio_id used to reference videos(id) during
+  // early development of the Audio Overlay feature. It now references
+  // audio_tracks(id). Clear any stale values that would point to videos which
+  // aren't audio tracks (the audio_tracks table is empty on upgrade anyway).
+  try {
+    db.prepare(`UPDATE streams SET audio_id=NULL
+      WHERE audio_id IS NOT NULL
+      AND audio_id NOT IN (SELECT id FROM audio_tracks)`).run();
+  } catch (_) { /* audio_tracks table might not exist yet on first run */ }
 }
 
 module.exports = { db, ensureSchema };

@@ -47,7 +47,7 @@
         <span class="playlist-item-pos"><%= item.position %></span>
         <div class="playlist-item-thumb">
           <% if (item.thumbnail) { %>
-            <img src="/uploads/thumbs/<%= item.thumbnail %>" alt="" loading="lazy">
+            <img src="/videos/<%= item.video_id %>/thumb" alt="" loading="lazy">
           <% } else { %>
             <div class="playlist-item-no-thumb">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="14" height="14" rx="2"/><path d="M22 7l-6 5 6 5V7z"/></svg>

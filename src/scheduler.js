@@ -37,9 +37,16 @@ function tick() {
       continue;
     }
     try {
+      // Resolve audio overlay path if configured.
+      let audioPath = null;
+      if (stream.audio_id) {
+        const audioManager = require('./audioManager');
+        audioPath = audioManager.getFilePath(stream.audio_id);
+      }
       streamManager.startStream(
         stream,
-        path.join(__dirname, '..', 'public', 'uploads', video.filename)
+        path.join(__dirname, '..', 'public', 'uploads', video.filename),
+        audioPath
       );
       db.prepare(`UPDATE schedules SET status='started', last_error=NULL WHERE id=?`).run(sch.id);
     } catch (e) {

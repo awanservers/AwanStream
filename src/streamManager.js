@@ -53,12 +53,15 @@ function getRetryDelay(attempt) {
   return Math.round(delay + jitter);
 }
 
-function startStream(stream, videoPath) {
+function startStream(stream, videoPath, audioPath) {
   if (running.has(stream.id)) {
     throw new Error('Stream already running');
   }
   if (!fs.existsSync(videoPath)) {
     throw new Error('Video file not found: ' + videoPath);
+  }
+  if (audioPath && !fs.existsSync(audioPath)) {
+    throw new Error('Audio overlay file not found: ' + audioPath);
   }
 
   // Clear retry-stopped flag on fresh manual start.
@@ -76,11 +79,63 @@ function startStream(stream, videoPath) {
     '-re',
   ];
   if (stream.loop_video) args.push('-stream_loop', '-1');
-  args.push(
-    '-i', videoPath,
-    '-map', '0:v:0',
-    '-map', '0:a:0?',
-  );
+  args.push('-i', videoPath);
+
+  // Audio overlay: add second input (looped independently) and mix with video's audio.
+  const hasAudioOverlay = !!audioPath;
+  if (hasAudioOverlay) {
+    args.push('-stream_loop', '-1', '-i', audioPath);
+  }
+
+  if (hasAudioOverlay) {
+    // Mix video audio (input 0) with overlay audio (input 1).
+    // Volume of overlay is configurable (default 0.3 = 30%).
+    const vol = stream.audio_volume || '0.3';
+
+    // Determine if video has audio. Prefer cached `videos.has_audio` column;
+    // fall back to a one-time probe (cached back to DB) for older rows.
+    let videoHasAudio = null;
+    const vidRow = db.prepare('SELECT id, has_audio FROM videos WHERE id=?').get(stream.video_id);
+    if (vidRow && vidRow.has_audio !== null && vidRow.has_audio !== undefined) {
+      videoHasAudio = vidRow.has_audio === 1;
+    } else {
+      try {
+        const transcoder = require('./transcoder');
+        const info = transcoder.probeVideoInfo(videoPath);
+        videoHasAudio = !!info.audioCodec;
+        // Cache result so subsequent starts skip the probe.
+        if (vidRow) {
+          db.prepare('UPDATE videos SET has_audio=? WHERE id=?')
+            .run(videoHasAudio ? 1 : 0, vidRow.id);
+        }
+      } catch (_) {
+        videoHasAudio = true; // safer default on probe failure
+      }
+    }
+
+    if (videoHasAudio) {
+      // Both video and overlay have audio → mix them.
+      args.push(
+        '-filter_complex',
+        `[0:a]volume=1.0[va];[1:a]volume=${vol}[oa];[va][oa]amix=inputs=2:duration=first:dropout_transition=2[aout]`,
+        '-map', '0:v:0',
+        '-map', '[aout]',
+      );
+    } else {
+      // Video has no audio → use overlay audio directly at configured volume.
+      args.push(
+        '-filter_complex',
+        `[1:a]volume=${vol}[aout]`,
+        '-map', '0:v:0',
+        '-map', '[aout]',
+      );
+    }
+  } else {
+    args.push(
+      '-map', '0:v:0',
+      '-map', '0:a:0?',
+    );
+  }
 
   if (stream.re_encode) {
     const kf = Math.max(1, Number(stream.keyframe_interval) || 2);
@@ -250,8 +305,14 @@ function scheduleRetry(stream, videoPath, exitCode) {
       return;
     }
     const newVideoPath = path.join(__dirname, '..', 'public', 'uploads', video.filename);
+    // Resolve audio overlay path if configured.
+    let audioPath = null;
+    if (current.audio_id) {
+      const audioManager = require('./audioManager');
+      audioPath = audioManager.getFilePath(current.audio_id);
+    }
     try {
-      startStream(current, newVideoPath);
+      startStream(current, newVideoPath, audioPath);
     } catch (e) {
       db.prepare(`UPDATE streams SET status='error', stopped_at=CURRENT_TIMESTAMP, last_error=? WHERE id=?`)
         .run('Retry failed: ' + e.message, stream.id);
@@ -425,7 +486,13 @@ function advancePlaylist(stream) {
   // Small delay to avoid rapid restart loops on error.
   setTimeout(() => {
     try {
-      startStream(updatedStream, videoPath);
+      // Resolve audio overlay path if configured.
+      let audioPath = null;
+      if (updatedStream.audio_id) {
+        const audioManager = require('./audioManager');
+        audioPath = audioManager.getFilePath(updatedStream.audio_id);
+      }
+      startStream(updatedStream, videoPath, audioPath);
     } catch (e) {
       db.prepare(`UPDATE streams SET status='error', last_error=? WHERE id=?`)
         .run('Playlist advance failed: ' + e.message, stream.id);

@@ -1,6 +1,7 @@
 const express = require('express');
 const { db } = require('../db');
 const looper = require('../looper');
+const audioManager = require('../audioManager');
 
 const router = express.Router();
 
@@ -39,12 +40,25 @@ router.get('/', (req, res) => {
     };
   });
 
+  // Recent loop errors (videos created by looper that ended in error).
+  const recentErrors = db.prepare(`
+    SELECT id, title, status, last_error, loop_job_id, created_at
+    FROM videos
+    WHERE loop_job_id IS NOT NULL AND status = 'error'
+    ORDER BY created_at DESC
+    LIMIT 10
+  `).all();
+
+  const audioTracks = audioManager.listReady();
+
   res.render('looper', {
     title: 'Loop',
     activeNav: 'looper',
     videos,
     presets: PRESETS,
     activeJobs,
+    recentErrors,
+    audioTracks,
     error: req.query.error || null,
     notice: req.query.notice || null,
   });
@@ -59,6 +73,11 @@ router.post('/start', (req, res) => {
   const smooth = req.body.smooth === undefined ? true : req.body.smooth === 'on' || req.body.smooth === '1' || req.body.smooth === 'true';
   let crossfadeSeconds = Number(req.body.crossfade_seconds);
   if (!Number.isFinite(crossfadeSeconds) || crossfadeSeconds <= 0) crossfadeSeconds = 1.0;
+
+  // Optional audio overlay.
+  const audioId = Number(req.body.audio_id) || null;
+  const audioVolume = parseFloat(req.body.audio_volume);
+  const audioMode = (req.body.audio_mode === 'replace') ? 'replace' : 'mix';
 
   if (!sourceVideoId) {
     return res.redirect('/looper?error=' + encodeURIComponent('Pilih video sumber dulu.'));
@@ -82,10 +101,14 @@ router.post('/start', (req, res) => {
     const { jobId, mode } = looper.start(sourceVideoId, targetSeconds, customTitle, {
       smooth,
       crossfadeSeconds,
+      audioId,
+      audioVolume: Number.isFinite(audioVolume) ? audioVolume : 0.3,
+      audioMode,
     });
     const modeLabel = mode === 'smooth' ? 'Smooth mode (seamless crossfade)' : 'Fast mode';
+    const audioLabel = audioId ? ` + audio overlay (${audioMode})` : '';
     return res.redirect('/looper?notice=' + encodeURIComponent(
-      `${modeLabel} — job #${jobId} started. Video baru akan muncul di Library setelah selesai.`
+      `${modeLabel}${audioLabel} — job #${jobId} started. Video baru akan muncul di Library setelah selesai.`
     ));
   } catch (err) {
     return res.redirect('/looper?error=' + encodeURIComponent(err.message));
@@ -131,6 +154,28 @@ router.post('/:jobId/cancel', (req, res) => {
     return res.redirect('/looper?error=' + encodeURIComponent('Job tidak ditemukan atau sudah selesai.'));
   }
   return res.redirect('/looper?notice=' + encodeURIComponent('Loop job cancelled.'));
+});
+
+// View log for an active or completed loop job.
+router.get('/:jobId/log', (req, res) => {
+  const log = looper.tailLog(req.params.jobId, 200);
+  if (!log) {
+    return res.status(404).type('text/plain').send('Log not found for job ' + req.params.jobId);
+  }
+  res.type('text/plain').send(log);
+});
+
+// View log by video ID (for completed jobs where jobId is stored in DB).
+router.get('/video/:videoId/log', (req, res) => {
+  const video = db.prepare('SELECT loop_job_id FROM videos WHERE id=?').get(Number(req.params.videoId));
+  if (!video || !video.loop_job_id) {
+    return res.status(404).type('text/plain').send('No loop log found for this video.');
+  }
+  const log = looper.tailLog(video.loop_job_id, 200);
+  if (!log) {
+    return res.status(404).type('text/plain').send('Log file not found (logs/loop-' + video.loop_job_id + '.log).');
+  }
+  res.type('text/plain').send(log);
 });
 
 module.exports = router;

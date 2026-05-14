@@ -7,6 +7,35 @@ Versi belum di-tag — pakai tanggal sebagai penanda release.
 
 ## [Unreleased]
 
+### Added — Download buttons & Security hardening
+- **Tombol Download di Library** — video library dan audio library sekarang punya tombol download per row. File dikirim dengan filename yang friendly (dari title, sanitized ASCII-only untuk RFC 6266 compliance). Express `res.download()` handle HTTP Range requests otomatis, jadi file besar (10+ GB) bisa resume kalau pakai download manager seperti IDM/FDM.
+- **Thumbnail tools untuk YouTube** — di video preview modal ada 2 tombol baru:
+  - **📸 Set thumbnail from current frame** — scrub ke frame yang bagus, klik tombol, AJAX capture frame itu sebagai thumbnail video (update in-place tanpa reload). Berguna untuk pilih frame paling dramatis buat thumbnail YouTube (misal: api lagi besar di video fireplace).
+  - **⬇ Download thumbnail** — download JPEG 1280×720 dengan filename dari title. Cocok sebagai base image untuk di-edit di Canva/Photoshop (tambah text, logo, dll).
+  - Backend: `generateThumbnail(path, id, { atSecond })` extended, `POST /videos/:id/regen-thumb` terima body `at_second`, route baru `GET /videos/:id/thumb/download`.
+- **Security fix: protected media serving** — sebelumnya `app.use(express.static('public'))` meng-expose folder `public/uploads/` tanpa auth, siapapun dengan URL bisa akses video/audio/thumbnail. Sekarang static middleware hanya serve `/css/` (assets browser yang memang public). Media files diakses via route protected:
+  - `GET /videos/:id/file` — stream video (untuk HTML5 `<video>` preview, support HTTP Range)
+  - `GET /videos/:id/download` — download dengan filename friendly
+  - `GET /videos/:id/thumb` — thumbnail image (cacheable)
+  - `GET /audio/:id/download` — download audio dengan filename friendly
+- Semua view yang sebelumnya pakai `/uploads/thumbs/<file>` atau `/uploads/<file>` diubah ke URL-based route. Query playlists juga ikut include `video_id` di collage thumbnails.
+
+### Added — Loop + Audio Overlay
+- **Audio overlay di Loop tool** — saat bikin video loop panjang, user bisa attach audio track dari Audio Library sebagai musik background. Audio otomatis di-loop mengikuti target durasi. Dua mode: **Mix** (gabung dengan suara asli video, default volume 0.3) atau **Replace** (ganti total suara video dengan audio overlay). Cocok untuk use case fireplace pendek + jazz background → video panjang siap upload ke YouTube. FFmpeg `amix` filter di phase 2 (smooth) atau single-pass (fast). Video tetap `-c:v copy` (no re-encode video), hanya audio yang di-encode ke AAC 192k.
+
+### Added — Audio Library (separate from videos)
+- **Tabel baru `audio_tracks`** — storage terpisah untuk file audio (MP3, M4A, AAC, WAV, OGG, OPUS, FLAC, WMA). Kolom: `id, title, filename, size_bytes, duration_seconds, codec, bitrate, sample_rate, channels, status, last_error, created_at`. File audio disimpan di `public/uploads/audio/`, terpisah dari video di `public/uploads/`.
+- **Halaman `/audio`** — Audio Library di sidebar (Videos → Audio). Upload via XHR dengan progress bar (max 500 MB per file), rename, delete. Menampilkan codec, duration, bitrate, channels (mono/stereo), size, status.
+- **Module `src/audioManager.js`** — API: `register()`, `getFilePath()`, `remove()`, `list()`, `listReady()`, `probe()`. Probe ffprobe saat upload, cache metadata. Delete guard: tidak bisa hapus track yang sedang dipakai running stream.
+- **Audio Overlay (revised)** — dropdown audio overlay di form stream sekarang ambil dari tabel `audio_tracks`, bukan dari video library. Lebih bersih dan tidak campur aduk dengan video.
+- **Performance fix** — kolom baru `videos.has_audio` (cached dari ffprobe saat upload) supaya `streamManager.startStream()` tidak perlu probe sync setiap stream start / playlist advance.
+
+### Added — Audio Overlay
+- **Audio Overlay untuk streaming** — pilih audio track (musik background) yang di-mix dengan video saat live streaming. Audio di-loop otomatis (independen dari video loop). Volume bisa diatur (0.0 - 1.0, default 0.3). Tersedia di Single Video dan Playlist stream. Kalau video tidak punya audio track, overlay jadi satu-satunya audio. Kalau video punya audio, keduanya di-mix via FFmpeg `amix` filter. Kolom baru: `streams.audio_id` (FK ke `audio_tracks`), `streams.audio_volume`.
+
+### Added — Loop tool logging
+- **Loop job logging** — log FFmpeg untuk fitur Loop sekarang bisa dilihat dari UI (tombol 📄 di active jobs + section "Recent errors" di halaman Loop). Job ID pakai timestamp (tidak reset setelah restart). Kolom baru `videos.loop_job_id` untuk tracking log file setelah job selesai. Endpoint baru: `GET /looper/:jobId/log`, `GET /looper/video/:videoId/log`.
+
 ### Added — Loop tool
 - **Video Loop** — perpanjang clip pendek jadi video panjang (30 menit - 24 jam) untuk 24/7 livestream. Accessible via sidebar "Loop" di bawah Streams. Pilih video sumber, target durasi (preset: 30m/1h/2h/3h/6h/12h/24h + custom menit), optional custom title. Dua mode:
   - **Smooth mode (default)** — 2-phase pipeline: phase 1 re-encode clip pendek jadi "seamless unit" dengan FFmpeg `xfade` + `acrossfade` di loop boundary (crossfade 1 detik antara tail + head). Phase 2 `-stream_loop -1 -c copy` seamless unit ke durasi target. Hasilnya: transisi loop tidak kelihatan sama sekali — mata tidak bisa catch frame jump karena join-nya ada di tengah crossfade. Butuh clip minimal ~2 detik (kalau lebih pendek, crossfade di-auto-shrink ke floor(L/3) detik).

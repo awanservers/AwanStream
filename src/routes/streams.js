@@ -4,6 +4,7 @@ const fs = require('fs');
 const { db } = require('../db');
 const streamManager = require('../streamManager');
 const transcoder = require('../transcoder');
+const audioManager = require('../audioManager');
 
 const router = express.Router();
 const uploadDir = path.join(__dirname, '..', '..', 'public', 'uploads');
@@ -21,15 +22,17 @@ router.get('/', (req, res) => {
 
 router.get('/single', (req, res) => {
   const streams = db.prepare(`
-    SELECT s.*, v.title AS video_title
+    SELECT s.*, v.title AS video_title, at.title AS audio_title
     FROM streams s
     LEFT JOIN videos v ON v.id = s.video_id
+    LEFT JOIN audio_tracks at ON at.id = s.audio_id
     WHERE s.playlist_id IS NULL
     ORDER BY s.created_at DESC
   `).all();
   const videos = db.prepare("SELECT id, title FROM videos WHERE status='ready' ORDER BY title").all();
+  const audioFiles = audioManager.listReady();
   res.render('streams-single', {
-    streams, videos, presets: PRESETS,
+    streams, videos, audioFiles, presets: PRESETS,
     error: req.query.error || null,
     notice: req.query.notice || null,
   });
@@ -37,10 +40,11 @@ router.get('/single', (req, res) => {
 
 router.get('/playlist', (req, res) => {
   const streams = db.prepare(`
-    SELECT s.*, v.title AS video_title, p.name AS playlist_name
+    SELECT s.*, v.title AS video_title, p.name AS playlist_name, at.title AS audio_title
     FROM streams s
     LEFT JOIN videos v ON v.id = s.video_id
     LEFT JOIN playlists p ON p.id = s.playlist_id
+    LEFT JOIN audio_tracks at ON at.id = s.audio_id
     WHERE s.playlist_id IS NOT NULL
     ORDER BY s.created_at DESC
   `).all();
@@ -48,8 +52,9 @@ router.get('/playlist', (req, res) => {
     SELECT p.*, (SELECT COUNT(*) FROM playlist_items pi WHERE pi.playlist_id=p.id) AS item_count
     FROM playlists p ORDER BY p.name
   `).all();
+  const audioFiles = audioManager.listReady();
   res.render('streams-playlist', {
-    streams, playlists, presets: PRESETS,
+    streams, playlists, audioFiles, presets: PRESETS,
     error: req.query.error || null,
     notice: req.query.notice || null,
   });
@@ -57,7 +62,7 @@ router.get('/playlist', (req, res) => {
 
 router.post('/', (req, res) => {
   const { name, video_id, playlist_id, platform, rtmp_url, stream_key, loop_video,
-          re_encode, video_bitrate, keyframe_interval, preset } = req.body;
+          re_encode, video_bitrate, keyframe_interval, preset, audio_id, audio_volume } = req.body;
   if (!name || !rtmp_url || !stream_key) {
     const back = playlist_id ? '/streams/playlist' : '/streams/single';
     return res.redirect(back + '?error=All+fields+are+required');
@@ -74,10 +79,13 @@ router.post('/', (req, res) => {
     if (!first) return res.redirect('/streams/playlist?error=Playlist+is+empty');
     effectiveVideoId = first.video_id;
   }
+  const audioId = Number(audio_id) || null;
+  const vol = parseFloat(audio_volume);
+  const safeVol = (Number.isFinite(vol) && vol >= 0 && vol <= 2) ? String(vol) : '0.3';
   db.prepare(`INSERT INTO streams
     (name, video_id, playlist_id, platform, rtmp_url, stream_key, loop_video,
-     re_encode, video_bitrate, keyframe_interval, preset)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+     re_encode, video_bitrate, keyframe_interval, preset, audio_id, audio_volume)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
     name.trim(),
     effectiveVideoId,
     plid,
@@ -89,6 +97,8 @@ router.post('/', (req, res) => {
     (video_bitrate || '4500k').trim(),
     Math.max(1, Math.min(10, Number(keyframe_interval) || 2)),
     (preset || 'veryfast').trim(),
+    audioId,
+    safeVol,
   );
   const back = plid ? '/streams/playlist' : '/streams/single';
   res.redirect(back + '?notice=Stream+created');
@@ -113,7 +123,12 @@ router.post('/:id/start', (req, res) => {
   }
 
   try {
-    streamManager.startStream(stream, path.join(uploadDir, video.filename));
+    // Resolve audio overlay path if configured.
+    let audioPath = null;
+    if (stream.audio_id) {
+      audioPath = audioManager.getFilePath(stream.audio_id);
+    }
+    streamManager.startStream(stream, path.join(uploadDir, video.filename), audioPath);
     res.redirect(back + '?notice=Stream+started');
   } catch (e) {
     res.redirect(back + '?error=' + encodeURIComponent(e.message));
@@ -149,7 +164,7 @@ router.post('/:id/edit', (req, res) => {
     return res.redirect(back + '?error=Stop+stream+first+before+editing');
   }
   const { name, video_id, playlist_id, platform, rtmp_url, stream_key, loop_video,
-          re_encode, video_bitrate, keyframe_interval, preset } = req.body;
+          re_encode, video_bitrate, keyframe_interval, preset, audio_id, audio_volume } = req.body;
   if (!name || !rtmp_url || !stream_key) {
     return res.redirect(back + '?error=All+fields+are+required');
   }
@@ -161,9 +176,13 @@ router.post('/:id/edit', (req, res) => {
       WHERE playlist_id=? ORDER BY position ASC LIMIT 1`).get(plid);
     if (first) effectiveVideoId = first.video_id;
   }
+  const audioId = Number(audio_id) || null;
+  const vol = parseFloat(audio_volume);
+  const safeVol = (Number.isFinite(vol) && vol >= 0 && vol <= 2) ? String(vol) : '0.3';
   db.prepare(`UPDATE streams SET
     name=?, video_id=?, playlist_id=?, platform=?, rtmp_url=?, stream_key=?,
-    loop_video=?, re_encode=?, video_bitrate=?, keyframe_interval=?, preset=?
+    loop_video=?, re_encode=?, video_bitrate=?, keyframe_interval=?, preset=?,
+    audio_id=?, audio_volume=?
     WHERE id=?`).run(
     name.trim(),
     effectiveVideoId,
@@ -176,6 +195,8 @@ router.post('/:id/edit', (req, res) => {
     (video_bitrate || '4500k').trim(),
     Math.max(1, Math.min(10, Number(keyframe_interval) || 2)),
     (preset || 'veryfast').trim(),
+    audioId,
+    safeVol,
     id,
   );
   res.redirect(back + '?notice=Stream+updated');

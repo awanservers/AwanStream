@@ -56,6 +56,7 @@ const pages = [
       streams: [{ id: 1, name: 's1', video_title: 'v1', platform: 'youtube',
                   status: 'idle', started_at: null, stopped_at: null, last_error: null }],
       videos: [{ id: 1, title: 'v1' }],
+      audioFiles: [{ id: 2, title: 'Jazz BGM', duration_seconds: 300 }],
       presets: { youtube: 'rtmp://a.rtmp.youtube.com/live2', custom: '' },
     },
   },
@@ -68,6 +69,7 @@ const pages = [
       streams: [{ id: 2, name: 's2', video_title: 'v1', playlist_name: 'My PL', platform: 'youtube',
                   status: 'idle', started_at: null, stopped_at: null, last_error: null }],
       playlists: [{ id: 1, name: 'My PL', item_count: 3 }],
+      audioFiles: [{ id: 2, title: 'Jazz BGM', duration_seconds: 300 }],
       presets: { youtube: 'rtmp://a.rtmp.youtube.com/live2', custom: '' },
     },
   },
@@ -132,6 +134,22 @@ const pages = [
         { key: '24h',  label: '24 hours',   seconds: 86400 },
       ],
       activeJobs: [],
+      audioTracks: [{ id: 1, title: 'Night Jazz', duration_seconds: 180 }],
+    },
+  },
+  {
+    name: 'audio',
+    file: 'audio.ejs',
+    locals: {
+      ...common,
+      currentUser: { id: 1, username: 'admin' },
+      tracks: [{
+        id: 1, title: 'Night Jazz', filename: '1_night.mp3',
+        size_bytes: 4_500_000, duration_seconds: 180, codec: 'mp3',
+        bitrate: 192000, sample_rate: 44100, channels: 2,
+        status: 'uploaded', last_error: null,
+        created_at: '2026-05-13 10:00:00',
+      }],
     },
   },
 ];

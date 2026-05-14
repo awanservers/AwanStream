@@ -94,9 +94,9 @@ router.post('/upload', (req, res) => {
     setImmediate(() => {
       try {
         const info = transcoder.probeVideoInfo(uploadedPath);
-        if (info.duration || info.width || info.height || info.fps) {
-          db.prepare(`UPDATE videos SET duration_seconds=?, src_width=?, src_height=?, src_fps=? WHERE id=?`)
-            .run(info.duration, info.width, info.height, info.fps, videoId);
+        if (info.duration || info.width || info.height || info.fps || info.audioCodec !== undefined) {
+          db.prepare(`UPDATE videos SET duration_seconds=?, src_width=?, src_height=?, src_fps=?, has_audio=? WHERE id=?`)
+            .run(info.duration, info.width, info.height, info.fps, info.audioCodec ? 1 : 0, videoId);
         }
       } catch (_) {}
       try {
@@ -450,13 +450,81 @@ router.post('/:id/regen-thumb', (req, res) => {
   if (!video) return res.redirect('/videos?error=Video+not+found');
   const videoPath = path.join(uploadDir, video.filename);
   if (!fs.existsSync(videoPath)) return res.redirect('/videos?error=File+not+found');
-  const thumb = transcoder.generateThumbnail(videoPath, video.id);
+
+  // Optional time (seconds) from body — user picked a specific frame.
+  const atSecond = parseFloat(req.body.at_second);
+  const opts = Number.isFinite(atSecond) && atSecond >= 0 ? { atSecond } : {};
+
+  const thumb = transcoder.generateThumbnail(videoPath, video.id, opts);
   if (thumb) {
     db.prepare('UPDATE videos SET thumbnail=? WHERE id=?').run(thumb, video.id);
+    // AJAX request? Return JSON so client can refresh preview without page reload.
+    if (req.xhr || req.headers.accept === 'application/json') {
+      return res.json({ ok: true, thumbnail: thumb, atSecond: opts.atSecond ?? null });
+    }
     res.redirect('/videos?notice=Thumbnail+generated');
   } else {
+    if (req.xhr || req.headers.accept === 'application/json') {
+      return res.status(500).json({ ok: false, error: 'Failed to generate thumbnail' });
+    }
     res.redirect('/videos?error=Failed+to+generate+thumbnail');
   }
+});
+
+// -- Media serving (auth-protected) ---------------------------------------
+
+// Sanitize title for use as a filename (ASCII only to avoid RFC 6266 issues).
+function safeDownloadName(title, fallbackExt = 'mp4') {
+  const clean = String(title || 'video')
+    .replace(/[^\x20-\x7E]/g, '')        // strip non-ASCII
+    .replace(/[\\/:*?"<>|]/g, '_')       // strip filesystem-unsafe chars
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!/\.[a-z0-9]{2,5}$/i.test(clean)) return `${clean || 'video'}.${fallbackExt}`;
+  return clean;
+}
+
+// Stream a video file inline (for HTML5 <video> preview). Supports HTTP Range.
+// res.sendFile handles 206 Partial Content automatically.
+router.get('/:id/file', (req, res) => {
+  const video = db.prepare('SELECT id, filename FROM videos WHERE id=?').get(req.params.id);
+  if (!video) return res.status(404).send('Not found');
+  const filePath = path.join(uploadDir, video.filename);
+  if (!fs.existsSync(filePath)) return res.status(404).send('File missing');
+  res.sendFile(filePath);
+});
+
+// Download a video with a friendly filename (from title).
+router.get('/:id/download', (req, res) => {
+  const video = db.prepare('SELECT id, title, filename FROM videos WHERE id=?').get(req.params.id);
+  if (!video) return res.status(404).send('Not found');
+  const filePath = path.join(uploadDir, video.filename);
+  if (!fs.existsSync(filePath)) return res.status(404).send('File missing');
+  const ext = path.extname(video.filename).replace('.', '') || 'mp4';
+  const downloadName = safeDownloadName(video.title, ext);
+  res.download(filePath, downloadName);
+});
+
+// Serve a thumbnail image.
+router.get('/:id/thumb', (req, res) => {
+  const video = db.prepare('SELECT thumbnail FROM videos WHERE id=?').get(req.params.id);
+  if (!video || !video.thumbnail) return res.status(404).send('No thumbnail');
+  const thumbPath = path.join(uploadDir, 'thumbs', video.thumbnail);
+  if (!fs.existsSync(thumbPath)) return res.status(404).send('Thumbnail missing');
+  // Short cache so regenerated thumbnails refresh within a minute.
+  // Clients that need instant refresh can append ?v=<timestamp> as cache-buster.
+  res.set('Cache-Control', 'private, max-age=60');
+  res.sendFile(thumbPath);
+});
+
+// Download thumbnail with friendly filename (1280x720 JPEG).
+router.get('/:id/thumb/download', (req, res) => {
+  const video = db.prepare('SELECT title, thumbnail FROM videos WHERE id=?').get(req.params.id);
+  if (!video || !video.thumbnail) return res.status(404).send('No thumbnail');
+  const thumbPath = path.join(uploadDir, 'thumbs', video.thumbnail);
+  if (!fs.existsSync(thumbPath)) return res.status(404).send('Thumbnail missing');
+  const downloadName = safeDownloadName(video.title, 'jpg').replace(/\.[a-z0-9]+$/i, '.jpg');
+  res.download(thumbPath, downloadName);
 });
 
 module.exports = router;

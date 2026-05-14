@@ -13,13 +13,13 @@ router.get('/', (req, res) => {
   `).all();
   // Fetch up to 4 thumbnails per playlist for the collage.
   const thumbsStmt = db.prepare(`
-    SELECT v.thumbnail FROM playlist_items pi
+    SELECT v.id AS video_id, v.thumbnail FROM playlist_items pi
     JOIN videos v ON v.id = pi.video_id
     WHERE pi.playlist_id = ? AND v.thumbnail IS NOT NULL
     ORDER BY pi.position ASC LIMIT 4
   `);
   for (const p of playlists) {
-    p.thumbs = thumbsStmt.all(p.id).map(r => r.thumbnail);
+    p.thumbs = thumbsStmt.all(p.id);
   }
   const videos = db.prepare(
     "SELECT id, title, thumbnail, duration_seconds, size_bytes FROM videos WHERE status='ready' ORDER BY title"

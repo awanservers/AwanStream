@@ -68,11 +68,12 @@
               <% if (v.thumbnail) { %>
                 <button type="button" class="video-thumb-btn"
                         data-open-modal="video-preview"
-                        data-video-src="/uploads/<%= v.filename %>"
+                        data-video-id="<%= v.id %>"
+                        data-video-src="/videos/<%= v.id %>/file"
                         data-video-title="<%= v.title %>"
                         data-video-info="<%= v.src_width && v.src_height ? v.src_width + '×' + v.src_height : '' %><%= v.size_bytes ? ' · ' + (v.size_bytes / (1024*1024)).toFixed(1) + ' MB' : '' %><%= v.duration_seconds ? ' · ' + Math.floor(v.duration_seconds/60) + 'm ' + Math.floor(v.duration_seconds%60) + 's' : '' %>"
                         title="Preview video">
-                  <img src="/uploads/thumbs/<%= v.thumbnail %>" alt="" class="video-thumb" loading="lazy">
+                  <img src="/videos/<%= v.id %>/thumb" alt="" class="video-thumb" loading="lazy">
                   <span class="video-thumb-play">▶</span>
                 </button>
               <% } else { %>
@@ -161,6 +162,9 @@
                       title="Edit">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
               </button>
+              <a href="/videos/<%= v.id %>/download" class="btn-icon" title="Download" download>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              </a>
               <form method="POST" action="/videos/<%= v.id %>/delete" class="inline"
                     data-confirm="Hapus video '<%= v.title %>'? File di disk akan ikut terhapus."
                     data-confirm-title="Hapus video"
@@ -780,7 +784,7 @@ document.addEventListener('modal:before-open', (e) => {
       <button type="button" class="modal-close" data-close-modal aria-label="Close">×</button>
     </header>
     <div class="modal-body" style="padding:0;background:#000;border-radius:0 0 12px 12px">
-      <video id="preview-player" controls preload="metadata" style="width:100%;max-height:70vh;display:block">
+      <video id="preview-player" controls preload="metadata" style="width:100%;max-height:65vh;display:block">
         Your browser does not support the video tag.
       </video>
       <div id="preview-info" class="small muted" style="padding:0.6rem 1rem;background:var(--panel)"></div>
@@ -788,6 +792,20 @@ document.addEventListener('modal:before-open', (e) => {
         Format video ini tidak didukung browser. Jalankan <strong>Prepare</strong> dulu untuk convert ke H.264 MP4.
       </div>
     </div>
+    <footer class="modal-footer" style="justify-content:space-between;flex-wrap:wrap;gap:0.5rem">
+      <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap">
+        <span class="small muted" id="preview-thumb-status"></span>
+      </div>
+      <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
+        <button type="button" class="btn" id="preview-capture-thumb" title="Gunakan frame saat ini sebagai thumbnail">
+          📸 Set thumbnail from current frame
+        </button>
+        <a href="#" class="btn" id="preview-download-thumb" target="_blank" download>
+          ⬇ Download thumbnail
+        </a>
+        <button type="button" class="btn" data-close-modal>Close</button>
+      </div>
+    </footer>
   </div>
 </dialog>
 <script>
@@ -798,18 +816,32 @@ document.addEventListener('modal:before-open', (e) => {
   const titleEl = document.getElementById('preview-title');
   const infoEl = document.getElementById('preview-info');
   const errorEl = document.getElementById('preview-error');
+  const captureBtn = document.getElementById('preview-capture-thumb');
+  const downloadBtn = document.getElementById('preview-download-thumb');
+  const statusEl = document.getElementById('preview-thumb-status');
+  let currentVideoId = null;
 
   document.addEventListener('modal:before-open', (e) => {
     if (e.detail.id !== 'video-preview') return;
     const btn = e.detail.trigger;
     if (!btn) return;
     const src = btn.dataset.videoSrc || '';
+    currentVideoId = btn.dataset.videoId || null;
     titleEl.textContent = btn.dataset.videoTitle || 'Preview';
     infoEl.textContent = btn.dataset.videoInfo || '';
     errorEl.style.display = 'none';
     player.style.display = 'block';
     player.src = src;
     player.load();
+    statusEl.textContent = '';
+    if (currentVideoId) {
+      downloadBtn.href = '/videos/' + currentVideoId + '/thumb/download';
+      downloadBtn.style.display = 'inline-flex';
+      captureBtn.style.display = 'inline-flex';
+    } else {
+      downloadBtn.style.display = 'none';
+      captureBtn.style.display = 'none';
+    }
   });
 
   player.addEventListener('error', () => {
@@ -821,7 +853,42 @@ document.addEventListener('modal:before-open', (e) => {
     player.pause();
     player.removeAttribute('src');
     player.load(); // release memory
+    currentVideoId = null;
   });
+
+  if (captureBtn) {
+    captureBtn.addEventListener('click', async () => {
+      if (!currentVideoId) return;
+      const t = player.currentTime;
+      if (!Number.isFinite(t)) {
+        statusEl.textContent = 'Player belum siap.';
+        return;
+      }
+      captureBtn.disabled = true;
+      statusEl.textContent = `⏳ Capturing frame at ${t.toFixed(1)}s…`;
+      try {
+        const fd = new FormData();
+        fd.append('at_second', t.toFixed(3));
+        const r = await fetch('/videos/' + currentVideoId + '/regen-thumb', {
+          method: 'POST',
+          headers: { 'Accept': 'application/json' },
+          body: fd,
+        });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const j = await r.json();
+        if (!j.ok) throw new Error(j.error || 'Failed');
+        statusEl.textContent = `✓ Thumbnail updated (frame at ${t.toFixed(1)}s). Refresh library untuk lihat.`;
+        // Bust cache on thumbnail images for this video in any open tab.
+        document.querySelectorAll('img[src^="/videos/' + currentVideoId + '/thumb"]').forEach(img => {
+          img.src = '/videos/' + currentVideoId + '/thumb?v=' + Date.now();
+        });
+      } catch (err) {
+        statusEl.textContent = '✗ Gagal: ' + err.message;
+      } finally {
+        captureBtn.disabled = false;
+      }
+    });
+  }
 })();
 </script>
 

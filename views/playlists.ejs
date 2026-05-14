@@ -35,7 +35,7 @@
                 <% if (p.thumbs && p.thumbs.length > 0) { %>
                   <div class="video-thumb playlist-collage collage-<%= p.thumbs.length >= 4 ? '4' : p.thumbs.length %>">
                     <% p.thumbs.slice(0, 4).forEach(t => { %>
-                      <img src="/uploads/thumbs/<%= t %>" alt="" loading="lazy">
+                      <img src="/videos/<%= t.video_id %>/thumb" alt="" loading="lazy">
                     <% }) %>
                   </div>
                 <% } else { %>
@@ -138,7 +138,7 @@
               <label class="video-picker-item">
                 <input type="checkbox" name="video_ids" value="<%= v.id %>" class="video-picker-check">
                 <% if (v.thumbnail) { %>
-                  <img src="/uploads/thumbs/<%= v.thumbnail %>" alt="" loading="lazy">
+                  <img src="/videos/<%= v.id %>/thumb" alt="" loading="lazy">
                 <% } else { %>
                   <div class="video-picker-thumb-empty">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="14" height="14" rx="2"/><path d="M22 7l-6 5 6 5V7z"/></svg>
@@ -303,7 +303,7 @@ document.addEventListener('modal:before-open', (e) => {
     listEl.innerHTML = videos.map(v => {
       const checked = selected.has(v.id) ? 'checked' : '';
       const thumb = v.thumbnail
-        ? '<img src="/uploads/thumbs/' + v.thumbnail + '" alt="" loading="lazy">'
+        ? '<img src="/videos/' + v.id + '/thumb" alt="" loading="lazy">'
         : '<div class="video-picker-thumb-empty"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="14" height="14" rx="2"/><path d="M22 7l-6 5 6 5V7z"/></svg></div>';
       const meta = fmtMB(v.size_bytes) + (v.duration_seconds ? ' · ' + fmtDur(v.duration_seconds) : '');
       return '<label class="video-picker-item">' +

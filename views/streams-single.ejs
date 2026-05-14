@@ -69,6 +69,8 @@
                       data-stream-bitrate="<%= s.video_bitrate || '4500k' %>"
                       data-stream-keyframe="<%= s.keyframe_interval || 2 %>"
                       data-stream-preset="<%= s.preset || 'veryfast' %>"
+                      data-stream-audio-id="<%= s.audio_id || '' %>"
+                      data-stream-audio-volume="<%= s.audio_volume || '0.3' %>"
                       title="Edit">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
               </button>
@@ -145,6 +147,17 @@
               <input type="checkbox" name="loop_video" value="1" checked>
               Loop video terus-menerus
             </label>
+            <label class="full">Audio overlay <span class="muted small">(opsional — musik background)</span>
+              <select name="audio_id">
+                <option value="">— Tanpa audio overlay —</option>
+                <% audioFiles.forEach(a => { %>
+                  <option value="<%= a.id %>"><%= a.title %></option>
+                <% }) %>
+              </select>
+            </label>
+            <label>Volume overlay <span class="muted small">(0.0 - 1.0)</span>
+              <input type="number" name="audio_volume" value="0.3" min="0" max="1" step="0.1" style="max-width:100px;">
+            </label>
           </div>
         </div>
         <footer class="modal-footer">
@@ -204,6 +217,17 @@
             <input type="checkbox" name="loop_video" value="1" id="edit-stream-loop">
             Loop video terus-menerus
           </label>
+          <label class="full">Audio overlay <span class="muted small">(opsional)</span>
+            <select name="audio_id" id="edit-stream-audio-id">
+              <option value="">— Tanpa audio overlay —</option>
+              <% audioFiles.forEach(a => { %>
+                <option value="<%= a.id %>"><%= a.title %></option>
+              <% }) %>
+            </select>
+          </label>
+          <label>Volume overlay
+            <input type="number" name="audio_volume" id="edit-stream-audio-volume" value="0.3" min="0" max="1" step="0.1" style="max-width:100px;">
+          </label>
         </div>
       </div>
       <footer class="modal-footer">
@@ -235,6 +259,8 @@
     document.getElementById('edit-stream-key').value = btn.dataset.streamKey || '';
     document.getElementById('edit-stream-loop').checked = btn.dataset.streamLoop === '1';
     document.getElementById('edit-re-encode').value = btn.dataset.streamReEncode || '0';
+    document.getElementById('edit-stream-audio-id').value = btn.dataset.streamAudioId || '';
+    document.getElementById('edit-stream-audio-volume').value = btn.dataset.streamAudioVolume || '0.3';
   });
 })();
 </script>
