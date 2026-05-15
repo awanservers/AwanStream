@@ -16,7 +16,7 @@
   </div>
 <% } else { %>
   <div class="table-wrap card card-flush">
-    <table class="table">
+    <table class="table audio-table">
       <thead><tr>
         <th>Title</th>
         <th>Format</th>
@@ -75,6 +75,13 @@
                       title="Rename">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
               </button>
+              <% if (!t.normalized || (t.last_error && /normalization/i.test(t.last_error))) { %>
+                <form method="POST" action="/audio/<%= t.id %>/normalize" class="inline" title="Re-normalize loudness">
+                  <button type="submit" class="btn-icon" style="color:#f59e0b;">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                  </button>
+                </form>
+              <% } %>
               <a href="/audio/<%= t.id %>/download" class="btn-icon" title="Download" download>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
               </a>

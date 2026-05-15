@@ -65,8 +65,24 @@
           <span style="flex:1;">
             <strong>Smooth mode (seamless crossfade)</strong>
             <div class="small muted" style="margin-top:3px;">
-              Tambahkan crossfade 1 detik di loop boundary supaya transisi halus tanpa "lompatan". Phase 1 re-encode clip pendek (beberapa detik) → phase 2 loop dengan -c copy.
-              <br><em>Matikan kalau kamu butuh kecepatan maksimal dan source sudah start≈end secara natural.</em>
+              Crossfade di loop boundary supaya transisi halus tanpa "lompatan". Phase 1 re-encode clip pendek → phase 2 loop dengan -c copy.
+              <br><em>Matikan kalau source sudah start≈end secara natural.</em>
+            </div>
+            <div id="crossfade-control" style="margin-top:12px; padding-top:10px; border-top:1px solid var(--border);">
+              <label style="display:block;">
+                <strong style="font-size:0.9rem;">Crossfade duration: <span id="crossfade-value">1.5</span>s</strong>
+                <input type="range" name="crossfade_seconds" id="crossfade_seconds"
+                       min="0.5" max="3.0" step="0.1" value="1.5"
+                       style="width:100%; margin-top:6px;">
+                <div class="small muted" style="display:flex; justify-content:space-between; margin-top:2px;">
+                  <span>0.5s (sharp)</span>
+                  <span>1.5s (default)</span>
+                  <span>3.0s (smooth)</span>
+                </div>
+                <div class="small muted" style="margin-top:4px;">
+                  Tip: clip Veo 8 detik → coba <strong>1.5s</strong>. Kalau masih kelihatan loop seam, naikin ke <strong>2.0s</strong>. Source clip lebih panjang (16+s) bisa coba <strong>2.5-3.0s</strong>.
+                </div>
+              </label>
             </div>
           </span>
         </label>
@@ -307,6 +323,26 @@ document.querySelectorAll('#loop-log-modal [data-close-modal]').forEach(btn => {
   }));
   if (customInput) customInput.addEventListener('input', updateEstimate);
   if (sourceSelect) sourceSelect.addEventListener('change', updateEstimate);
+
+  // Crossfade slider — live update label and toggle visibility with smooth mode.
+  const crossfadeSlider = document.getElementById('crossfade_seconds');
+  const crossfadeValue = document.getElementById('crossfade-value');
+  const crossfadeControl = document.getElementById('crossfade-control');
+  const smoothCheck = document.getElementById('smooth');
+
+  if (crossfadeSlider && crossfadeValue) {
+    crossfadeSlider.addEventListener('input', () => {
+      crossfadeValue.textContent = parseFloat(crossfadeSlider.value).toFixed(1);
+    });
+  }
+  if (smoothCheck && crossfadeControl) {
+    const updateCrossfadeVisibility = () => {
+      crossfadeControl.style.opacity = smoothCheck.checked ? '1' : '0.4';
+      if (crossfadeSlider) crossfadeSlider.disabled = !smoothCheck.checked;
+    };
+    smoothCheck.addEventListener('change', updateCrossfadeVisibility);
+    updateCrossfadeVisibility();
+  }
 
   const form = document.getElementById('loop-form');
   if (form) {

@@ -1056,6 +1056,21 @@ button.video-thumb-empty svg { width: 32px; height: 32px; }
 }
 .videos-table th.col-w-actions { text-align: left; }
 
+/* Audio table — same actions alignment pattern */
+.audio-table td { vertical-align: middle !important; }
+.audio-table td.actions {
+  white-space: nowrap;
+  min-width: 180px;
+}
+.audio-table td.actions > * {
+  vertical-align: middle;
+}
+.audio-table td.actions form.inline {
+  display: inline-block;
+  vertical-align: middle;
+  margin: 0;
+}
+
 .video-title-cell { padding-top: 0.6rem !important; padding-bottom: 0.6rem !important; }
 .video-title {
   font-weight: 500;

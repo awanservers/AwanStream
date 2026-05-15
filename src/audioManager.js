@@ -99,14 +99,23 @@ function applyLoudnessNormalization(filePath, measured) {
     `measured_LRA=${measured.input_lra}`,
     `measured_thresh=${measured.input_thresh}`,
     `offset=${measured.target_offset}`,
-    'linear=true',
+    // Note: we deliberately don't use linear=true. While linear is slightly
+    // more accurate, it requires measured values to fall within strict bounds
+    // and rejects otherwise. Dynamic mode (the default) handles edge cases
+    // better and is already very accurate for two-pass normalization.
     'print_format=summary',
-  ].join(':');
+  ];
+  // FFmpeg filter syntax: filtername=key=value:key=value (= after name, : between params)
+  // Chain alimiter after loudnorm as brick-wall safety against peaks that
+  // loudnorm's internal limiter might miss.
+  const afStr = af[0] + '=' + af.slice(1).join(':') + ',alimiter=limit=-1.5dB:level=disabled';
 
   const args = [
     '-hide_banner', '-nostats', '-y',
     '-i', filePath,
-    '-af', af,
+    '-vn',           // drop any video stream (MP3 album art etc.) — audio only
+    '-map', '0:a',   // explicitly map only audio stream
+    '-af', afStr,
     '-c:a', outCodec,
     '-ar', '48000',  // resample to 48k for consistency (loudnorm requires 192k internally anyway)
     tmpPath,
@@ -114,6 +123,15 @@ function applyLoudnessNormalization(filePath, measured) {
 
   const r = spawnSync('ffmpeg', args, { encoding: 'utf8', timeout: 10 * 60 * 1000 });
   if (r.status !== 0) {
+    // Log the actual ffmpeg error to disk so we can diagnose next time.
+    try {
+      const errLog = path.join(logsDir, 'audio-normalize.log');
+      const stderrTail = String(r.stderr || '').split('\n').slice(-30).join('\n');
+      fs.appendFileSync(errLog,
+        `[${new Date().toISOString()}]   pass 2 ffmpeg failed (exit ${r.status})\n` +
+        `=== stderr tail ===\n${stderrTail}\n=== end ===\n`
+      );
+    } catch (_) {}
     if (fs.existsSync(tmpPath)) try { fs.unlinkSync(tmpPath); } catch (_) {}
     return false;
   }

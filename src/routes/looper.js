@@ -71,8 +71,12 @@ router.post('/start', (req, res) => {
   const customTitle = (req.body.title || '').trim() || null;
   // Checkbox: absent (unchecked) = fast mode, present = smooth mode. Default smooth.
   const smooth = req.body.smooth === undefined ? true : req.body.smooth === 'on' || req.body.smooth === '1' || req.body.smooth === 'true';
-  let crossfadeSeconds = Number(req.body.crossfade_seconds);
-  if (!Number.isFinite(crossfadeSeconds) || crossfadeSeconds <= 0) crossfadeSeconds = 1.0;
+  // Crossfade duration (smooth mode). Default 1.5s, clamped to safe range.
+  // Recommended 0.5-3.0s. Less than 0.5 too short to hide boundary; more than
+  // 3.0 eats too much content for 8-12s source clips.
+  let crossfadeSeconds = parseFloat(req.body.crossfade_seconds);
+  if (!Number.isFinite(crossfadeSeconds) || crossfadeSeconds <= 0) crossfadeSeconds = 1.5;
+  crossfadeSeconds = Math.max(0.3, Math.min(3.0, crossfadeSeconds));
 
   // Optional audio overlay.
   const audioId = Number(req.body.audio_id) || null;

@@ -266,15 +266,17 @@ function runFastPhase(ctx) {
     // Check if source video has audio (cached or probe once).
     const srcHasAudio = probeHasAudio(srcPath);
 
-    // Build the audio filter chain. Final stage is loudnorm to -14 LUFS
-    // (YouTube standard) so output is consistent regardless of source levels.
-    const loudnormFilter = 'loudnorm=I=-14:TP=-1.5:LRA=11';
+    // Build the audio filter chain. Final stages: loudnorm to -14 LUFS
+    // (YouTube standard) followed by alimiter as a brick-wall safety against
+    // peaks that loudnorm's internal limiter might miss (crackling fire has
+    // sharp transients that sometimes slip through).
+    const masterFilter = 'loudnorm=I=-14:TP=-1.5:LRA=11,alimiter=limit=-1.5dB:level=disabled';
 
     if (audioMode === 'replace' || !srcHasAudio) {
       // Overlay becomes the only audio.
       args.push(
         '-filter_complex',
-        `[1:a]volume=${audioVolume},${loudnormFilter}[aout]`,
+        `[1:a]volume=${audioVolume},${masterFilter}[aout]`,
         '-map', '0:v:0',
         '-map', '[aout]',
       );
@@ -282,7 +284,7 @@ function runFastPhase(ctx) {
       // Mix video audio (full volume) + overlay (configurable volume).
       args.push(
         '-filter_complex',
-        `[0:a]volume=1.0[va];[1:a]volume=${audioVolume}[oa];[va][oa]amix=inputs=2:duration=first:dropout_transition=2,${loudnormFilter}[aout]`,
+        `[0:a]volume=1.0[va];[1:a]volume=${audioVolume}[oa];[va][oa]amix=inputs=2:duration=first:dropout_transition=2,${masterFilter}[aout]`,
         '-map', '0:v:0',
         '-map', '[aout]',
       );
@@ -439,20 +441,20 @@ function runSmoothPhase2(ctx) {
     // Seamless unit may or may not have audio (depends on source). Check once.
     const seamlessHasAudio = probeHasAudio(seamlessPath);
 
-    // Final loudness normalization to -14 LUFS (YouTube standard) so output
-    // is consistent regardless of source levels.
-    const loudnormFilter = 'loudnorm=I=-14:TP=-1.5:LRA=11';
+    // Final loudness normalization to -14 LUFS (YouTube standard) followed
+    // by alimiter brick-wall safety to catch peaks loudnorm misses.
+    const masterFilter = 'loudnorm=I=-14:TP=-1.5:LRA=11,alimiter=limit=-1.5dB:level=disabled';
 
     if (audioMode === 'replace' || !seamlessHasAudio) {
       args.push(
-        '-filter_complex', `[1:a]volume=${audioVolume},${loudnormFilter}[aout]`,
+        '-filter_complex', `[1:a]volume=${audioVolume},${masterFilter}[aout]`,
         '-map', '0:v:0',
         '-map', '[aout]',
       );
     } else {
       args.push(
         '-filter_complex',
-        `[0:a]volume=1.0[va];[1:a]volume=${audioVolume}[oa];[va][oa]amix=inputs=2:duration=first:dropout_transition=2,${loudnormFilter}[aout]`,
+        `[0:a]volume=1.0[va];[1:a]volume=${audioVolume}[oa];[va][oa]amix=inputs=2:duration=first:dropout_transition=2,${masterFilter}[aout]`,
         '-map', '0:v:0',
         '-map', '[aout]',
       );

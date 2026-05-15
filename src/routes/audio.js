@@ -79,6 +79,54 @@ router.post('/:id/rename', (req, res) => {
   res.redirect('/audio?notice=Audio+renamed');
 });
 
+router.post('/:id/normalize', (req, res) => {
+  const id = Number(req.params.id);
+  const track = audioManager.get(id);
+  if (!track) return res.redirect('/audio?error=Track+not+found');
+  const filePath = audioManager.getFilePath(id);
+  if (!filePath) return res.redirect('/audio?error=File+missing+on+disk');
+
+  // Run normalize in background so response isn't blocked.
+  setImmediate(() => {
+    const { db } = require('../db');
+    try {
+      const result = audioManager.normalize(filePath);
+      if (!result.ok) {
+        db.prepare(`UPDATE audio_tracks
+          SET last_error=?, normalized=0
+          WHERE id=?`).run('Loudness normalization failed: ' + result.error, id);
+        return;
+      }
+      const fs = require('fs');
+      const stat = fs.statSync(filePath);
+      const newInfo = audioManager.probe(filePath);
+      db.prepare(`UPDATE audio_tracks SET
+        size_bytes=?,
+        codec=COALESCE(?, codec),
+        bitrate=COALESCE(?, bitrate),
+        sample_rate=COALESCE(?, sample_rate),
+        integrated_lufs=?,
+        true_peak_db=?,
+        loudness_range=?,
+        normalized=1,
+        last_error=NULL
+        WHERE id=?`).run(
+        stat.size,
+        newInfo.codec, newInfo.bitrate, newInfo.sampleRate,
+        result.measured.input_i,
+        result.measured.input_tp,
+        result.measured.input_lra,
+        id,
+      );
+    } catch (e) {
+      db.prepare(`UPDATE audio_tracks SET last_error=?
+        WHERE id=?`).run('Re-normalize crashed: ' + e.message, id);
+    }
+  });
+
+  res.redirect('/audio?notice=Re-normalize+started+in+background');
+});
+
 // -- Media serving (auth-protected) ---------------------------------------
 
 function safeDownloadName(title, fallbackExt = 'mp3') {
