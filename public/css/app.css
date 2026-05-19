@@ -329,6 +329,28 @@ select { cursor: pointer; }
   text-shadow: 0 0 3px rgba(0, 0, 0, 0.7);
 }
 
+/* ----- Resume upload banner ----- */
+
+.resume-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.7rem 0.9rem;
+  margin-top: 0.6rem;
+  background: rgba(245, 165, 36, 0.08);
+  border: 1px solid rgba(245, 165, 36, 0.4);
+  border-radius: var(--radius);
+}
+.resume-banner-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+.resume-banner-text strong { color: var(--warn); font-size: 0.9rem; }
+.resume-banner-actions { display: flex; gap: 0.4rem; flex-shrink: 0; }
+
 /* ----- Responsive ----- */
 
 @media (max-width: 960px) {

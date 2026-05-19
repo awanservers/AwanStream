@@ -15,6 +15,7 @@ const looper = require('./src/looper');
 const audioManager = require('./src/audioManager');
 const youtubeManager = require('./src/youtubeManager');
 const youtubeUploader = require('./src/youtubeUploader');
+const chunkUpload = require('./src/chunkUpload');
 const { requireAuth, injectUser } = require('./src/auth');
 
 const authRoutes = require('./src/routes/auth');
@@ -36,6 +37,7 @@ looper.reconcileOnBoot();
 audioManager.reconcileOnBoot();
 youtubeManager.reconcileOnBoot();
 youtubeUploader.reconcileOnBoot();
+chunkUpload.reconcileOnBoot();
 scheduler.start();
 
 const app = express();

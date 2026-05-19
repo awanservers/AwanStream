@@ -12,10 +12,46 @@ const chunksBaseDir = path.join(uploadDir, 'chunks');
 if (!fs.existsSync(chunksBaseDir)) fs.mkdirSync(chunksBaseDir, { recursive: true });
 
 const CHUNK_SIZE = 10 * 1024 * 1024; // 10 MB per chunk
+const META_FILE = 'meta.json';
 
 // In-memory session tracking (uploadId -> metadata).
-// Survives as long as the process runs; stale sessions cleaned up periodically.
+// Reconstructed from disk on boot via reconcileOnBoot() so resume survives
+// server restarts. Stale sessions cleaned up periodically.
 const sessions = new Map();
+
+function metaPath(uploadId) {
+  return path.join(chunksBaseDir, uploadId, META_FILE);
+}
+
+function writeMeta(session) {
+  const meta = {
+    uploadId: session.uploadId,
+    filename: session.filename,
+    fileSize: session.fileSize,
+    totalChunks: session.totalChunks,
+    createdAt: session.createdAt,
+    lastActivity: session.lastActivity,
+  };
+  try {
+    fs.writeFileSync(metaPath(session.uploadId), JSON.stringify(meta));
+  } catch (e) {
+    console.error('[chunkUpload] writeMeta failed:', e.message);
+  }
+}
+
+// Scan a chunk directory and return Set of received chunk indices.
+function scanReceivedChunks(uploadId) {
+  const dir = path.join(chunksBaseDir, uploadId);
+  const received = new Set();
+  if (!fs.existsSync(dir)) return received;
+  let files;
+  try { files = fs.readdirSync(dir); } catch (_) { return received; }
+  for (const f of files) {
+    const m = /^chunk_(\d{6})$/.exec(f);
+    if (m) received.add(Number(m[1]));
+  }
+  return received;
+}
 
 /**
  * Initialize a chunked upload session.
@@ -39,44 +75,66 @@ function initSession(filename, fileSize) {
     lastActivity: Date.now(),
   };
   sessions.set(uploadId, session);
+  writeMeta(session);
 
   return { uploadId, chunkSize: CHUNK_SIZE, totalChunks };
 }
 
 /**
- * Get session info (for resume support).
+ * Get session info (for resume support). Falls back to disk reconstruction
+ * if the in-memory entry was lost (e.g., after server restart before
+ * reconcileOnBoot has run, or session was never registered in this process).
+ *
  * @param {string} uploadId
  * @returns {object|null}
  */
 function getSession(uploadId) {
-  const session = sessions.get(uploadId);
+  let session = sessions.get(uploadId);
   if (!session) {
-    // Try to reconstruct from disk (server restart scenario).
-    const chunkDir = path.join(chunksBaseDir, uploadId);
-    if (!fs.existsSync(chunkDir)) return null;
-    // Can't fully reconstruct without metadata, return minimal info.
-    return null;
+    // Try to reconstruct from disk (server restart, or just-rebuilt session).
+    const dir = path.join(chunksBaseDir, uploadId);
+    if (!fs.existsSync(dir)) return null;
+    let meta;
+    try {
+      meta = JSON.parse(fs.readFileSync(metaPath(uploadId), 'utf8'));
+    } catch (_) {
+      return null; // metadata gone, can't safely resume
+    }
+    session = {
+      ...meta,
+      receivedChunks: scanReceivedChunks(uploadId),
+      lastActivity: Date.now(),
+    };
+    sessions.set(uploadId, session);
   }
   return {
     uploadId: session.uploadId,
     filename: session.filename,
     fileSize: session.fileSize,
     totalChunks: session.totalChunks,
+    chunkSize: CHUNK_SIZE,
     receivedChunks: Array.from(session.receivedChunks).sort((a, b) => a - b),
     complete: session.receivedChunks.size === session.totalChunks,
   };
 }
 
 /**
- * Save a chunk to disk.
+ * Save a chunk to disk. Idempotent — re-uploading the same index is fine
+ * (overwrites existing chunk file with identical content).
  * @param {string} uploadId
  * @param {number} chunkIndex - 0-based
  * @param {Buffer} data
  * @returns {{ received, total, complete }}
  */
 function saveChunk(uploadId, chunkIndex, data) {
-  const session = sessions.get(uploadId);
-  if (!session) throw new Error('Upload session not found');
+  let session = sessions.get(uploadId);
+  if (!session) {
+    // Try to reconstruct on-demand (e.g., chunk arrives just after restart
+    // before any /status call).
+    const info = getSession(uploadId);
+    if (!info) throw new Error('Upload session not found');
+    session = sessions.get(uploadId);
+  }
   if (chunkIndex < 0 || chunkIndex >= session.totalChunks) {
     throw new Error(`Invalid chunk index ${chunkIndex} (total: ${session.totalChunks})`);
   }
@@ -85,6 +143,8 @@ function saveChunk(uploadId, chunkIndex, data) {
   fs.writeFileSync(chunkPath, data);
   session.receivedChunks.add(chunkIndex);
   session.lastActivity = Date.now();
+  // Persist activity timestamp so resume after restart still has fresh mtime.
+  writeMeta(session);
 
   return {
     received: session.receivedChunks.size,
@@ -189,6 +249,34 @@ function cleanupStale() {
   }
 }
 
+/**
+ * Rebuild in-memory sessions Map from disk metadata. Called once at boot so
+ * resume works across server restarts. Sessions without a meta.json are
+ * treated as orphans and left alone (will be GC'd by cleanupStale).
+ */
+function reconcileOnBoot() {
+  if (!fs.existsSync(chunksBaseDir)) return;
+  let dirs;
+  try { dirs = fs.readdirSync(chunksBaseDir); } catch (_) { return; }
+  let restored = 0;
+  for (const dir of dirs) {
+    const metaP = path.join(chunksBaseDir, dir, META_FILE);
+    if (!fs.existsSync(metaP)) continue;
+    try {
+      const meta = JSON.parse(fs.readFileSync(metaP, 'utf8'));
+      if (!meta.uploadId || !meta.filename || !meta.fileSize || !meta.totalChunks) continue;
+      sessions.set(meta.uploadId, {
+        ...meta,
+        receivedChunks: scanReceivedChunks(meta.uploadId),
+      });
+      restored++;
+    } catch (_) { /* corrupt meta — skip */ }
+  }
+  if (restored > 0) {
+    console.log(`[chunkUpload] restored ${restored} resumable upload session${restored > 1 ? 's' : ''}`);
+  }
+}
+
 // Run cleanup every hour.
 setInterval(cleanupStale, 60 * 60 * 1000);
 
@@ -200,4 +288,5 @@ module.exports = {
   finalize,
   cleanup,
   cleanupStale,
+  reconcileOnBoot,
 };

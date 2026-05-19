@@ -294,6 +294,16 @@
           <p class="muted small">
             Allowed formats: mp4, mkv, mov, flv, ts, webm. Max 5 GB.
           </p>
+          <div id="resume-banner" class="resume-banner" style="display:none">
+            <div class="resume-banner-text">
+              <strong>Resume upload?</strong>
+              <span class="small muted" id="resume-banner-info"></span>
+            </div>
+            <div class="resume-banner-actions">
+              <button type="button" class="btn btn-sm btn-primary" id="resume-banner-resume">Resume</button>
+              <button type="button" class="btn btn-sm" id="resume-banner-discard">Discard</button>
+            </div>
+          </div>
           <div id="upload-progress" class="progress" style="display:none">
             <div class="progress-bar" style="width:0%"></div>
             <div class="progress-label small">starting…</div>
@@ -526,6 +536,33 @@ document.addEventListener('modal:before-open', (e) => {
   const CHUNKED_THRESHOLD = 50 * 1024 * 1024;   // <= 50 MB: simple XHR
   const MAX_RETRIES_PER_CHUNK = 5;
   const RETRY_BASE_DELAY = 2000;                 // 2s, doubles each attempt
+  const LS_KEY = 'awanstream:pending_upload';   // localStorage key for resume
+
+  // -------- Resume state (localStorage) --------
+  function lsGet() {
+    try {
+      const raw = localStorage.getItem(LS_KEY);
+      if (!raw) return null;
+      const v = JSON.parse(raw);
+      if (!v || !v.uploadId) return null;
+      return v;
+    } catch (_) { return null; }
+  }
+  function lsSet(v) {
+    try { localStorage.setItem(LS_KEY, JSON.stringify(v)); } catch (_) {}
+  }
+  function lsClear() {
+    try { localStorage.removeItem(LS_KEY); } catch (_) {}
+  }
+  // File identity check — same name, size, lastModified means very likely
+  // the same file. Not 100% guaranteed (could rename + edit), but good enough
+  // and avoids hashing 400 MB on every modal open.
+  function fileMatches(savedFile, file) {
+    if (!savedFile || !file) return false;
+    return savedFile.name === file.name
+      && savedFile.size === file.size
+      && savedFile.lastModified === file.lastModified;
+  }
 
   function fmtBytes(n) {
     if (n < 1024) return n + ' B';
@@ -546,6 +583,98 @@ document.addEventListener('modal:before-open', (e) => {
 
   let activeXhr = null;
   let cancelled = false;
+
+  // Resume banner state — populated when modal opens with a pending upload.
+  let pendingResume = null;     // { uploadId, totalChunks, receivedChunks[], filename, fileSize, title, folderId }
+  const resumeBanner = document.getElementById('resume-banner');
+  const resumeBannerInfo = document.getElementById('resume-banner-info');
+  const resumeBtn = document.getElementById('resume-banner-resume');
+  const discardBtn = document.getElementById('resume-banner-discard');
+
+  function hideResumeBanner() {
+    if (resumeBanner) resumeBanner.style.display = 'none';
+    pendingResume = null;
+  }
+
+  async function checkPendingUpload() {
+    hideResumeBanner();
+    const saved = lsGet();
+    if (!saved || !saved.uploadId) return;
+    // Ask server if session still exists & is incomplete.
+    let info;
+    try {
+      const r = await fetch('/videos/chunked/' + encodeURIComponent(saved.uploadId) + '/status');
+      if (!r.ok) { lsClear(); return; }
+      info = await r.json();
+    } catch (_) { return; }
+    if (!info || info.complete) { lsClear(); return; }
+    pendingResume = {
+      uploadId: info.uploadId,
+      filename: info.filename,
+      fileSize: info.fileSize,
+      totalChunks: info.totalChunks,
+      receivedChunks: info.receivedChunks || [],
+      savedFile: saved.file || null,
+      title: saved.title || '',
+      folderId: saved.folderId || '',
+    };
+    const pct = Math.round((pendingResume.receivedChunks.length / pendingResume.totalChunks) * 100);
+    if (resumeBannerInfo) {
+      resumeBannerInfo.textContent = pendingResume.filename
+        + ' · ' + fmtBytes(pendingResume.fileSize)
+        + ' · ' + pct + '% done (' + pendingResume.receivedChunks.length + '/' + pendingResume.totalChunks + ' chunks)';
+    }
+    if (resumeBanner) resumeBanner.style.display = 'flex';
+  }
+
+  if (discardBtn) {
+    discardBtn.addEventListener('click', async () => {
+      if (!pendingResume) { hideResumeBanner(); return; }
+      try {
+        await fetch('/videos/chunked/' + encodeURIComponent(pendingResume.uploadId), { method: 'DELETE' });
+      } catch (_) {}
+      lsClear();
+      hideResumeBanner();
+    });
+  }
+
+  if (resumeBtn) {
+    resumeBtn.addEventListener('click', () => {
+      if (!pendingResume) return;
+      // User must re-select the same file (browsers don't keep file handles across reloads).
+      const fileInput = form.querySelector('input[type=file]');
+      fileInput.click();
+      // Once user picks a file, the change handler below will validate it
+      // matches and trigger the resumed upload automatically.
+      fileInput.dataset.pendingResume = '1';
+    });
+  }
+
+  // When user picks a file with a pending resume, validate match.
+  const fileInputForResume = form.querySelector('input[type=file]');
+  if (fileInputForResume) {
+    fileInputForResume.addEventListener('change', () => {
+      if (!fileInputForResume.dataset.pendingResume || !pendingResume) return;
+      delete fileInputForResume.dataset.pendingResume;
+      const f = fileInputForResume.files && fileInputForResume.files[0];
+      if (!f) return;
+      if (!fileMatches(pendingResume.savedFile, f)) {
+        if (!confirm('File yang dipilih beda dengan upload sebelumnya (nama/ukuran/tanggal modifikasi).\n\nLanjut sebagai upload baru? (Upload lama akan di-discard)')) {
+          fileInputForResume.value = '';
+          return;
+        }
+        // Discard old session, treat as fresh upload.
+        fetch('/videos/chunked/' + encodeURIComponent(pendingResume.uploadId), { method: 'DELETE' }).catch(() => {});
+        lsClear();
+        hideResumeBanner();
+        return;
+      }
+      // File matches — auto-submit to trigger resumed upload.
+      hideResumeBanner();
+      // Defer submit so the change event finishes first.
+      setTimeout(() => form.requestSubmit(), 0);
+    });
+  }
 
   // ---- Single-XHR fallback (for small files) ----
   function uploadSimple(file, title, folderId) {
@@ -586,29 +715,52 @@ document.addEventListener('modal:before-open', (e) => {
   }
 
   // ---- Chunked upload with per-chunk retry ----
-  async function uploadChunked(file, title, folderId) {
-    // 1. Init session.
-    label.textContent = 'preparing chunks…';
-    const initRes = await fetch('/videos/chunked/init', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ filename: file.name, fileSize: file.size }),
-    });
-    if (!initRes.ok) {
-      const err = await initRes.json().catch(() => ({ error: 'HTTP ' + initRes.status }));
-      throw new Error(err.error || 'init failed');
-    }
-    const { uploadId, totalChunks } = await initRes.json();
+  // If `existing` is provided ({uploadId, totalChunks, receivedSet}), we skip
+  // init and resume from where we left off.
+  async function uploadChunked(file, title, folderId, existing) {
+    let uploadId, totalChunks;
+    let receivedSet = new Set();
 
-    // 2. Upload each chunk with retry.
-    const started = Date.now();
-    let bytesUploaded = 0;
-    let lastSpeedSampleTs = started;
-    let lastSpeedSampleBytes = 0;
+    if (existing) {
+      uploadId = existing.uploadId;
+      totalChunks = existing.totalChunks;
+      receivedSet = existing.receivedSet || new Set();
+      label.textContent = 'resuming (' + receivedSet.size + '/' + totalChunks + ' chunks done)…';
+    } else {
+      label.textContent = 'preparing chunks…';
+      const initRes = await fetch('/videos/chunked/init', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: file.name, fileSize: file.size }),
+      });
+      if (!initRes.ok) {
+        const err = await initRes.json().catch(() => ({ error: 'HTTP ' + initRes.status }));
+        throw new Error(err.error || 'init failed');
+      }
+      const init = await initRes.json();
+      uploadId = init.uploadId;
+      totalChunks = init.totalChunks;
+      // Persist for resume.
+      lsSet({
+        uploadId, totalChunks,
+        title: title || '',
+        folderId: folderId || '',
+        file: { name: file.name, size: file.size, lastModified: file.lastModified },
+        startedAt: Date.now(),
+      });
+    }
+
+    // Start counters reflect already-uploaded chunks (resume).
+    let bytesUploaded = receivedSet.size * CHUNK_SIZE;
+    if (bytesUploaded > file.size) bytesUploaded = file.size; // last chunk smaller
+    const startedAt = Date.now();
+    let lastSpeedSampleTs = startedAt;
+    let lastSpeedSampleBytes = bytesUploaded;
     let smoothedSpeed = 0;
 
     for (let i = 0; i < totalChunks; i++) {
       if (cancelled) throw new Error('aborted');
+      if (receivedSet.has(i)) continue; // already on server
 
       const start = i * CHUNK_SIZE;
       const end = Math.min(start + CHUNK_SIZE, file.size);
@@ -622,7 +774,6 @@ document.addEventListener('modal:before-open', (e) => {
             const totalLoaded = bytesUploaded + chunkLoaded;
             const pct = Math.min(99, Math.round((totalLoaded / file.size) * 100));
             bar.style.width = pct + '%';
-            // Smooth speed over a 3s sliding window.
             const now = Date.now();
             const dt = (now - lastSpeedSampleTs) / 1000;
             if (dt >= 1) {
@@ -653,6 +804,7 @@ document.addEventListener('modal:before-open', (e) => {
         }
       }
       bytesUploaded += blob.size;
+      receivedSet.add(i);
     }
 
     // 3. Finalize: server merges chunks, creates video row.
@@ -669,6 +821,7 @@ document.addEventListener('modal:before-open', (e) => {
       throw new Error(err.error || 'finalize failed');
     }
     bar.style.width = '100%';
+    lsClear();
     return uploadId;
   }
 
@@ -720,18 +873,28 @@ document.addEventListener('modal:before-open', (e) => {
     submitBtn.textContent = 'Uploading…';
     cancelBtn.textContent = 'Batalkan upload';
 
+    // If a resume is in progress and the picked file matches, resume.
+    let existing = null;
+    if (pendingResume && fileMatches(pendingResume.savedFile, file)) {
+      existing = {
+        uploadId: pendingResume.uploadId,
+        totalChunks: pendingResume.totalChunks,
+        receivedSet: new Set(pendingResume.receivedChunks),
+      };
+    }
+
     try {
-      if (file.size <= CHUNKED_THRESHOLD) {
+      if (file.size <= CHUNKED_THRESHOLD && !existing) {
         await uploadSimple(file, title, folderId);
       } else {
-        await uploadChunked(file, title, folderId);
+        await uploadChunked(file, title, folderId, existing);
       }
       label.textContent = 'done, reloading…';
       try { dlg.close(); } catch (_) {}
       window.location.href = '/videos';
     } catch (err) {
       if (err && err.message === 'aborted') {
-        label.textContent = 'upload dibatalkan';
+        label.textContent = 'upload dibatalkan (chunks kept on server, refresh untuk Resume)';
         bar.style.width = '0%';
       } else {
         label.textContent = 'upload failed: ' + (err && err.message ? err.message : err);
@@ -763,6 +926,8 @@ document.addEventListener('modal:before-open', (e) => {
     cancelled = false;
     activeXhr = null;
     form.reset();
+    // Check for pending upload to offer resume.
+    checkPendingUpload();
   });
 })();
 
