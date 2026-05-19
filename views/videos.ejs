@@ -496,7 +496,8 @@ document.addEventListener('modal:before-open', (e) => {
   }
 });
 
-// Upload with XHR (simple, reliable).
+// Upload — chunked with auto-resume and retry per chunk.
+// Falls back to single XHR for files <= 50 MB (overhead not worth it).
 (function () {
   // Tab switching for upload modal.
   const tabs = document.querySelectorAll('.modal-tabs .tab');
@@ -520,74 +521,247 @@ document.addEventListener('modal:before-open', (e) => {
   const submitBtn = document.getElementById('upload-submit');
   const cancelBtn = document.getElementById('upload-cancel');
 
+  // Tunables — kept in sync with src/chunkUpload.js (CHUNK_SIZE = 10 MB).
+  const CHUNK_SIZE = 10 * 1024 * 1024;
+  const CHUNKED_THRESHOLD = 50 * 1024 * 1024;   // <= 50 MB: simple XHR
+  const MAX_RETRIES_PER_CHUNK = 5;
+  const RETRY_BASE_DELAY = 2000;                 // 2s, doubles each attempt
+
   function fmtBytes(n) {
     if (n < 1024) return n + ' B';
     if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
     if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + ' MB';
     return (n / 1024 / 1024 / 1024).toFixed(2) + ' GB';
   }
+  function fmtEta(sec) {
+    if (!Number.isFinite(sec) || sec < 0) return '—';
+    const m = Math.floor(sec / 60), s = Math.floor(sec % 60);
+    if (m >= 60) {
+      const h = Math.floor(m / 60), mm = m % 60;
+      return h + 'h ' + mm + 'm';
+    }
+    return m + 'm ' + s + 's';
+  }
+  function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-  let xhr = null;
+  let activeXhr = null;
+  let cancelled = false;
 
-  form.addEventListener('submit', (e) => {
+  // ---- Single-XHR fallback (for small files) ----
+  function uploadSimple(file, title, folderId) {
+    return new Promise((resolve, reject) => {
+      const data = new FormData();
+      data.append('video', file);
+      if (title) data.append('title', title);
+      if (folderId) data.append('folder_id', folderId);
+
+      const xhr = new XMLHttpRequest();
+      activeXhr = xhr;
+      xhr.open('POST', '/videos/upload');
+
+      const started = Date.now();
+      xhr.upload.onprogress = (ev) => {
+        if (!ev.lengthComputable) return;
+        const pct = Math.min(100, Math.round((ev.loaded / ev.total) * 100));
+        bar.style.width = pct + '%';
+        const elapsed = (Date.now() - started) / 1000;
+        const speed = ev.loaded / Math.max(1, elapsed);
+        const eta = speed > 0 ? (ev.total - ev.loaded) / speed : null;
+        label.textContent = [
+          pct + '%',
+          fmtBytes(ev.loaded) + ' / ' + fmtBytes(ev.total),
+          fmtBytes(speed) + '/s',
+          'eta ' + fmtEta(eta),
+        ].join(' · ');
+      };
+      xhr.onload = () => {
+        activeXhr = null;
+        if (xhr.status >= 200 && xhr.status < 400) resolve();
+        else reject(new Error('HTTP ' + xhr.status));
+      };
+      xhr.onerror = () => { activeXhr = null; reject(new Error('Network error')); };
+      xhr.onabort = () => { activeXhr = null; reject(new Error('aborted')); };
+      xhr.send(data);
+    });
+  }
+
+  // ---- Chunked upload with per-chunk retry ----
+  async function uploadChunked(file, title, folderId) {
+    // 1. Init session.
+    label.textContent = 'preparing chunks…';
+    const initRes = await fetch('/videos/chunked/init', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename: file.name, fileSize: file.size }),
+    });
+    if (!initRes.ok) {
+      const err = await initRes.json().catch(() => ({ error: 'HTTP ' + initRes.status }));
+      throw new Error(err.error || 'init failed');
+    }
+    const { uploadId, totalChunks } = await initRes.json();
+
+    // 2. Upload each chunk with retry.
+    const started = Date.now();
+    let bytesUploaded = 0;
+    let lastSpeedSampleTs = started;
+    let lastSpeedSampleBytes = 0;
+    let smoothedSpeed = 0;
+
+    for (let i = 0; i < totalChunks; i++) {
+      if (cancelled) throw new Error('aborted');
+
+      const start = i * CHUNK_SIZE;
+      const end = Math.min(start + CHUNK_SIZE, file.size);
+      const blob = file.slice(start, end);
+
+      let attempt = 0;
+      while (true) {
+        if (cancelled) throw new Error('aborted');
+        try {
+          await sendChunk(uploadId, i, blob, (chunkLoaded) => {
+            const totalLoaded = bytesUploaded + chunkLoaded;
+            const pct = Math.min(99, Math.round((totalLoaded / file.size) * 100));
+            bar.style.width = pct + '%';
+            // Smooth speed over a 3s sliding window.
+            const now = Date.now();
+            const dt = (now - lastSpeedSampleTs) / 1000;
+            if (dt >= 1) {
+              const inst = (totalLoaded - lastSpeedSampleBytes) / dt;
+              smoothedSpeed = smoothedSpeed === 0 ? inst : smoothedSpeed * 0.7 + inst * 0.3;
+              lastSpeedSampleTs = now;
+              lastSpeedSampleBytes = totalLoaded;
+            }
+            const eta = smoothedSpeed > 0 ? (file.size - totalLoaded) / smoothedSpeed : null;
+            label.textContent = [
+              pct + '%',
+              fmtBytes(totalLoaded) + ' / ' + fmtBytes(file.size),
+              (smoothedSpeed > 0 ? fmtBytes(smoothedSpeed) + '/s' : '…'),
+              'eta ' + fmtEta(eta),
+              'chunk ' + (i + 1) + '/' + totalChunks + (attempt > 0 ? ' (retry ' + attempt + ')' : ''),
+            ].join(' · ');
+          });
+          break; // success
+        } catch (err) {
+          if (cancelled) throw new Error('aborted');
+          attempt++;
+          if (attempt > MAX_RETRIES_PER_CHUNK) {
+            throw new Error('Chunk ' + (i + 1) + ' failed after ' + MAX_RETRIES_PER_CHUNK + ' retries: ' + err.message);
+          }
+          const delay = Math.min(30000, RETRY_BASE_DELAY * Math.pow(2, attempt - 1));
+          label.textContent = 'chunk ' + (i + 1) + '/' + totalChunks + ' failed (' + err.message + '), retry in ' + Math.round(delay / 1000) + 's…';
+          await sleep(delay);
+        }
+      }
+      bytesUploaded += blob.size;
+    }
+
+    // 3. Finalize: server merges chunks, creates video row.
+    if (cancelled) throw new Error('aborted');
+    label.textContent = 'finalizing…';
+    bar.style.width = '99%';
+    const finRes = await fetch('/videos/chunked/' + uploadId + '/finalize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: title || '', folder_id: folderId || null }),
+    });
+    if (!finRes.ok) {
+      const err = await finRes.json().catch(() => ({ error: 'HTTP ' + finRes.status }));
+      throw new Error(err.error || 'finalize failed');
+    }
+    bar.style.width = '100%';
+    return uploadId;
+  }
+
+  // Send a single chunk via XHR so we get upload progress events.
+  function sendChunk(uploadId, index, blob, onProgress) {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      activeXhr = xhr;
+      xhr.open('PUT', '/videos/chunked/' + uploadId + '/' + index);
+      xhr.upload.onprogress = (ev) => {
+        if (ev.lengthComputable && onProgress) onProgress(ev.loaded);
+      };
+      xhr.onload = () => {
+        activeXhr = null;
+        if (xhr.status >= 200 && xhr.status < 400) {
+          resolve();
+        } else {
+          let msg = 'HTTP ' + xhr.status;
+          try {
+            const j = JSON.parse(xhr.responseText);
+            if (j && j.error) msg = j.error;
+          } catch (_) {}
+          reject(new Error(msg));
+        }
+      };
+      xhr.onerror = () => { activeXhr = null; reject(new Error('network error')); };
+      xhr.onabort = () => { activeXhr = null; reject(new Error('aborted')); };
+      xhr.ontimeout = () => { activeXhr = null; reject(new Error('timeout')); };
+      // No xhr.timeout — chunk size keeps requests bounded; rely on retry on stall.
+      xhr.send(blob);
+    });
+  }
+
+  form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const fileInput = form.querySelector('input[type=file]');
     if (!fileInput.files || fileInput.files.length === 0) return;
 
-    const data = new FormData(form);
-    xhr = new XMLHttpRequest();
-    xhr.open('POST', form.action);
+    const file = fileInput.files[0];
+    const title = form.querySelector('input[name="title"]').value.trim();
+    const folderField = form.querySelector('[name="folder_id"]');
+    const folderId = folderField ? folderField.value : '';
 
+    cancelled = false;
     progress.style.display = 'block';
     bar.style.width = '0%';
-    label.textContent = 'preparing…';
+    label.textContent = 'starting…';
     submitBtn.disabled = true;
     submitBtn.textContent = 'Uploading…';
     cancelBtn.textContent = 'Batalkan upload';
 
-    const started = Date.now();
-    xhr.upload.onprogress = (ev) => {
-      if (!ev.lengthComputable) return;
-      const pct = Math.min(100, Math.round((ev.loaded / ev.total) * 100));
-      bar.style.width = pct + '%';
-      const elapsed = (Date.now() - started) / 1000;
-      const speed = ev.loaded / Math.max(1, elapsed);
-      label.textContent = [pct + '%', fmtBytes(ev.loaded) + ' / ' + fmtBytes(ev.total), fmtBytes(speed) + '/s'].join(' · ');
-    };
-
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 400) {
-        label.textContent = 'done, reloading…';
-        try { dlg.close(); } catch (_) {}
-        // Force reload to see the new video in the list.
-        window.location.href = '/videos';
+    try {
+      if (file.size <= CHUNKED_THRESHOLD) {
+        await uploadSimple(file, title, folderId);
       } else {
-        label.textContent = 'upload failed (' + xhr.status + ')';
-        submitBtn.disabled = false; submitBtn.textContent = 'Upload'; cancelBtn.textContent = 'Batal';
+        await uploadChunked(file, title, folderId);
       }
-    };
-    xhr.onerror = () => {
-      label.textContent = 'network error, coba lagi';
-      submitBtn.disabled = false; submitBtn.textContent = 'Upload'; cancelBtn.textContent = 'Batal';
-    };
-    xhr.onabort = () => {
-      label.textContent = 'upload dibatalkan'; bar.style.width = '0%';
-      submitBtn.disabled = false; submitBtn.textContent = 'Upload'; cancelBtn.textContent = 'Batal';
-    };
-    xhr.send(data);
+      label.textContent = 'done, reloading…';
+      try { dlg.close(); } catch (_) {}
+      window.location.href = '/videos';
+    } catch (err) {
+      if (err && err.message === 'aborted') {
+        label.textContent = 'upload dibatalkan';
+        bar.style.width = '0%';
+      } else {
+        label.textContent = 'upload failed: ' + (err && err.message ? err.message : err);
+      }
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Upload';
+      cancelBtn.textContent = 'Batal';
+    }
   });
 
   cancelBtn.addEventListener('click', (e) => {
-    if (xhr && xhr.readyState !== XMLHttpRequest.DONE) {
-      e.preventDefault(); e.stopPropagation();
-      xhr.abort(); xhr = null;
+    if (!submitBtn.disabled) return; // not uploading, default close
+    e.preventDefault();
+    e.stopPropagation();
+    cancelled = true;
+    if (activeXhr && activeXhr.readyState !== XMLHttpRequest.DONE) {
+      try { activeXhr.abort(); } catch (_) {}
+      activeXhr = null;
     }
   }, true);
 
   dlg.addEventListener('modal:before-open', () => {
-    progress.style.display = 'none'; bar.style.width = '0%'; label.textContent = 'starting…';
-    submitBtn.disabled = false; submitBtn.textContent = 'Upload'; cancelBtn.textContent = 'Batal';
-    xhr = null;
+    progress.style.display = 'none';
+    bar.style.width = '0%';
+    label.textContent = 'starting…';
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Upload';
+    cancelBtn.textContent = 'Batal';
+    cancelled = false;
+    activeXhr = null;
     form.reset();
   });
 })();

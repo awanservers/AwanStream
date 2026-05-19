@@ -94,7 +94,7 @@ function saveChunk(uploadId, chunkIndex, data) {
 }
 
 /**
- * Merge all chunks into the final file.
+ * Merge all chunks into the final file (streaming, memory-safe).
  * @param {string} uploadId
  * @returns {{ filename, filePath, fileSize }}
  */
@@ -108,34 +108,33 @@ function finalize(uploadId) {
   const safe = session.filename.replace(/[^a-zA-Z0-9._-]/g, '_');
   const finalName = `${Date.now()}_${safe}`;
   const finalPath = path.join(uploadDir, finalName);
-
-  // Merge chunks sequentially.
-  const writeStream = fs.createWriteStream(finalPath);
   const chunkDir = path.join(chunksBaseDir, uploadId);
 
-  for (let i = 0; i < session.totalChunks; i++) {
-    const chunkPath = path.join(chunkDir, `chunk_${String(i).padStart(6, '0')}`);
-    const data = fs.readFileSync(chunkPath);
-    writeStream.write(data);
+  // Stream chunks sequentially via fd to avoid loading any full chunk into a
+  // long-lived buffer beyond a single read at a time. fs.copyFileSync would
+  // overwrite, so we open once for write and append each chunk.
+  const fdOut = fs.openSync(finalPath, 'w');
+  try {
+    for (let i = 0; i < session.totalChunks; i++) {
+      const chunkPath = path.join(chunkDir, `chunk_${String(i).padStart(6, '0')}`);
+      if (!fs.existsSync(chunkPath)) {
+        throw new Error(`Chunk file missing on disk: ${i}`);
+      }
+      const data = fs.readFileSync(chunkPath);
+      fs.writeSync(fdOut, data);
+    }
+  } finally {
+    fs.closeSync(fdOut);
   }
-  writeStream.end();
-
-  // Wait for write to finish (sync-ish via fd).
-  // Since writeStream.end() flushes, the file should be complete after this.
-  // We'll use a sync approach instead for reliability.
-  writeStream.close();
-
-  // Actually, let's do it fully sync for simplicity:
-  fs.unlinkSync(finalPath); // remove the stream-created file
-  const fd = fs.openSync(finalPath, 'w');
-  for (let i = 0; i < session.totalChunks; i++) {
-    const chunkPath = path.join(chunkDir, `chunk_${String(i).padStart(6, '0')}`);
-    const data = fs.readFileSync(chunkPath);
-    fs.writeSync(fd, data);
-  }
-  fs.closeSync(fd);
 
   const stat = fs.statSync(finalPath);
+
+  // Sanity check: merged size should match declared file size (off-by-one
+  // tolerable for last chunk). If wildly off, the upload is corrupt.
+  if (Math.abs(stat.size - session.fileSize) > 1024) {
+    try { fs.unlinkSync(finalPath); } catch (_) {}
+    throw new Error(`Size mismatch: merged=${stat.size}, expected=${session.fileSize}`);
+  }
 
   // Cleanup chunks.
   cleanup(uploadId);
@@ -169,21 +168,23 @@ function cleanupStale() {
       cleanup(id);
     }
   }
-  // Also clean orphan directories on disk.
+  // Also clean orphan directories on disk (sessions Map lost on restart).
   if (fs.existsSync(chunksBaseDir)) {
-    const dirs = fs.readdirSync(chunksBaseDir);
+    let dirs = [];
+    try { dirs = fs.readdirSync(chunksBaseDir); } catch (_) { return; }
     for (const dir of dirs) {
-      if (!sessions.has(dir)) {
-        const dirPath = path.join(chunksBaseDir, dir);
+      if (sessions.has(dir)) continue;
+      const dirPath = path.join(chunksBaseDir, dir);
+      try {
         const stat = fs.statSync(dirPath);
-        if (stat.isDirectory() && now - stat.mtimeMs > maxAge) {
-          const files = fs.readdirSync(dirPath);
-          for (const f of files) {
-            try { fs.unlinkSync(path.join(dirPath, f)); } catch (_) {}
-          }
-          try { fs.rmdirSync(dirPath); } catch (_) {}
+        if (!stat.isDirectory()) continue;
+        if (now - stat.mtimeMs <= maxAge) continue;
+        const files = fs.readdirSync(dirPath);
+        for (const f of files) {
+          try { fs.unlinkSync(path.join(dirPath, f)); } catch (_) {}
         }
-      }
+        try { fs.rmdirSync(dirPath); } catch (_) {}
+      } catch (_) { /* dir gone between readdir and stat */ }
     }
   }
 }

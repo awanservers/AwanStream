@@ -181,14 +181,31 @@ router.get('/chunked/:uploadId/status', (req, res) => {
 });
 
 // Upload a single chunk (raw binary body).
+// Reads body up to CHUNK_SIZE + small slack to avoid memory bombs from
+// malformed clients sending unbounded data.
 router.put('/chunked/:uploadId/:chunkIndex', (req, res) => {
   const uploadId = req.params.uploadId;
   const chunkIndex = Number(req.params.chunkIndex);
+  const MAX_BYTES = chunkUpload.CHUNK_SIZE + 64 * 1024; // 64 KB slack
   const chunks = [];
-  req.on('data', (chunk) => chunks.push(chunk));
+  let total = 0;
+  let aborted = false;
+
+  req.on('data', (chunk) => {
+    if (aborted) return;
+    total += chunk.length;
+    if (total > MAX_BYTES) {
+      aborted = true;
+      res.status(413).json({ error: 'Chunk too large' });
+      req.destroy();
+      return;
+    }
+    chunks.push(chunk);
+  });
   req.on('end', () => {
+    if (aborted) return;
     try {
-      const data = Buffer.concat(chunks);
+      const data = Buffer.concat(chunks, total);
       const result = chunkUpload.saveChunk(uploadId, chunkIndex, data);
       res.json(result);
     } catch (e) {
@@ -196,7 +213,7 @@ router.put('/chunked/:uploadId/:chunkIndex', (req, res) => {
     }
   });
   req.on('error', (e) => {
-    res.status(500).json({ error: e.message });
+    if (!aborted) res.status(500).json({ error: e.message });
   });
 });
 

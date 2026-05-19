@@ -427,6 +427,38 @@ app.use((err, req, res, _next) => {
   res.status(500).render('error', { message: err.message });
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`AwanStream running on http://localhost:${PORT}`);
 });
+
+// Disable per-request timeouts so slow uploads (e.g. 400 MB on 1 Mbps =
+// ~50 minutes) don't get killed mid-flight. Chunked upload sends 10 MB per
+// request so individual chunks are quick, but legacy single-XHR upload for
+// small files still benefits from generous limits.
+//
+// Defaults (Node 18+):
+//   server.requestTimeout = 300000  (5 min) — kills active uploads on slow links
+//   server.headersTimeout = 60000   (60 s)  — fine, keep default-ish
+//   server.keepAliveTimeout = 5000  (5 s)
+//
+// We disable requestTimeout entirely; chunked upload protects against
+// genuinely stuck connections at the application layer (per-chunk retry).
+server.requestTimeout = 0;            // disable; chunked upload handles stalls
+server.headersTimeout = 120 * 1000;   // 2 min for slow first byte
+server.keepAliveTimeout = 75 * 1000;  // 75 s — beats most reverse proxies' 60 s
+
+// Graceful shutdown: stop accepting new connections, let in-flight finish.
+function shutdown(signal) {
+  console.log(`\n[${signal}] shutting down…`);
+  server.close((err) => {
+    if (err) console.error('server.close error:', err);
+    process.exit(err ? 1 : 0);
+  });
+  // Hard exit if shutdown takes too long (stuck FFmpeg children, etc.).
+  setTimeout(() => {
+    console.warn('shutdown timeout (10s), forcing exit');
+    process.exit(1);
+  }, 10000).unref();
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT',  () => shutdown('SIGINT'));
