@@ -351,8 +351,8 @@
         <div class="grid-2">
           <label>Resolution / FPS
             <select name="preset">
-              <% Object.keys(presets).forEach(p => { %>
-                <option value="<%= p %>" <%= p === '1080p30' ? 'selected' : '' %>><%= p %></option>
+              <% Object.keys(presets).forEach(p => { const isLow = /-low$/.test(p); %>
+                <option value="<%= p %>" <%= p === '1080p30' ? 'selected' : '' %>><%= p %> · <%= presets[p].br %><%= isLow ? ' (hemat bandwidth)' : '' %></option>
               <% }) %>
             </select>
           </label>
@@ -448,6 +448,8 @@ document.addEventListener('modal:before-open', (e) => {
 
     // Pick the best matching preset: same or lower resolution, same or lower fps.
     // Priority: exact match > lower res > lowest available.
+    // We auto-pick high-quality variants only; -low presets remain available
+    // in the dropdown for users with bandwidth constraints.
     const PRESETS = [
       { key: '1080p60', w: 1920, h: 1080, fps: 60 },
       { key: '1080p30', w: 1920, h: 1080, fps: 30 },
@@ -473,27 +475,38 @@ document.addEventListener('modal:before-open', (e) => {
     }
 
     // Update note based on currently selected preset (called on open + on change).
+    // Strip "-low" suffix when matching; both variants share resolution/fps.
     function updateNote() {
-      const selected = PRESETS.find(p => p.key === presetSel.value);
+      const baseKey = (presetSel.value || '').replace(/-low$/, '');
+      const selected = PRESETS.find(p => p.key === baseKey);
       if (!selected) { srcNote.textContent = ''; return; }
+      const isLow = /-low$/.test(presetSel.value);
       const isExact = selected.w === w && selected.h === h;
       const isFpsMatch = fps && Math.abs(selected.fps - fps) < 2;
+      let msg, color;
       if (isExact && isFpsMatch) {
-        srcNote.textContent = '✓ Preset cocok dengan source';
-        srcNote.style.color = 'var(--ok)';
+        msg = '✓ Preset cocok dengan source';
+        color = 'var(--ok)';
       } else if (selected.w > w || selected.h > h) {
-        srcNote.textContent = '⚠ Upscale dari source — tidak disarankan';
-        srcNote.style.color = 'var(--warn)';
+        msg = '⚠ Upscale dari source — tidak disarankan';
+        color = 'var(--warn)';
       } else if (isExact && selected.fps > fps) {
-        srcNote.textContent = '⚠ Source ' + Math.round(fps) + 'fps → ' + selected.fps + 'fps (frame duplikat, tidak tambah kualitas)';
-        srcNote.style.color = 'var(--warn)';
+        msg = '⚠ Source ' + Math.round(fps) + 'fps → ' + selected.fps + 'fps (frame duplikat, tidak tambah kualitas)';
+        color = 'var(--warn)';
       } else if (isExact && selected.fps < fps) {
-        srcNote.textContent = 'Source ' + Math.round(fps) + 'fps → ' + selected.fps + 'fps (frame di-drop)';
-        srcNote.style.color = 'var(--muted)';
+        msg = 'Source ' + Math.round(fps) + 'fps → ' + selected.fps + 'fps (frame di-drop)';
+        color = 'var(--muted)';
       } else {
-        srcNote.textContent = 'Downscale ke ' + selected.key + ' dari source ' + w + '×' + h;
-        srcNote.style.color = 'var(--muted)';
+        msg = 'Downscale ke ' + selected.key + ' dari source ' + w + '×' + h;
+        color = 'var(--muted)';
       }
+      // Append low-bitrate caveat if applicable.
+      if (isLow) {
+        msg += ' · ⚠ low bitrate (YouTube Studio akan kasih warning)';
+        color = 'var(--warn)';
+      }
+      srcNote.textContent = msg;
+      srcNote.style.color = color;
     }
 
     updateNote();
@@ -1149,8 +1162,8 @@ document.addEventListener('modal:before-open', (e) => {
         <div class="grid-2">
           <label>Resolution / FPS
             <select name="preset">
-              <% Object.keys(presets).forEach(p => { %>
-                <option value="<%= p %>" <%= p === '1080p30' ? 'selected' : '' %>><%= p %></option>
+              <% Object.keys(presets).forEach(p => { const isLow = /-low$/.test(p); %>
+                <option value="<%= p %>" <%= p === '1080p30' ? 'selected' : '' %>><%= p %> · <%= presets[p].br %><%= isLow ? ' (hemat bandwidth)' : '' %></option>
               <% }) %>
             </select>
           </label>

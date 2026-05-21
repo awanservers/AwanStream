@@ -13,10 +13,24 @@ if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
 const jobs = new Map();
 
 const PRESETS = {
-  '720p30':  { w: 1280, h: 720,  fps: 30, br: '2500k', kf: 2 },
-  '720p60':  { w: 1280, h: 720,  fps: 60, br: '4000k', kf: 2 },
-  '1080p30': { w: 1920, h: 1080, fps: 30, br: '4500k', kf: 2 },
-  '1080p60': { w: 1920, h: 1080, fps: 60, br: '6000k', kf: 2 },
+  // Bitrates aligned with YouTube Live recommendation (2026):
+  //   https://support.google.com/youtube/answer/2853702
+  // 720p30:  3000–6000 kbps  → 4500
+  // 720p60:  4500–9000 kbps  → 7500
+  // 1080p30: 3000–6000 kbps  → 8000  (push above the range; YouTube Studio
+  //                                   warns at "recommended 6800k" otherwise)
+  // 1080p60: 4500–9000 kbps  → 12000 (1080p60 recommended is 6800–10000;
+  //                                   we cap above to dodge the warning).
+  '720p30':  { w: 1280, h: 720,  fps: 30, br: '4500k',  kf: 2 },
+  '720p60':  { w: 1280, h: 720,  fps: 60, br: '7500k',  kf: 2 },
+  '1080p30': { w: 1920, h: 1080, fps: 30, br: '8000k',  kf: 2 },
+  '1080p60': { w: 1920, h: 1080, fps: 60, br: '12000k', kf: 2 },
+
+  // Low-bitrate variants for limited bandwidth (Indonesia rural / mobile
+  // tethering). Preserves the previous defaults so existing workflows
+  // can opt in by name. Will trigger YouTube Studio bitrate warning.
+  '720p30-low':  { w: 1280, h: 720,  fps: 30, br: '2500k', kf: 2 },
+  '1080p30-low': { w: 1920, h: 1080, fps: 30, br: '4500k', kf: 2 },
 };
 
 function presets() { return PRESETS; }

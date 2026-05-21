@@ -46,7 +46,7 @@ const pages = [
       currentUser: { id: 1, username: 'admin' },
       videos: [{ id: 1, title: 't', filename: 'f.mp4', size_bytes: 1000000,
                  status: 'ready', last_error: null, created_at: '2026-05-11 10:00:00' }],
-      presets: { '720p30': {}, '1080p30': {} },
+      presets: { '720p30': { br: '4500k' }, '720p60': { br: '7500k' }, '1080p30': { br: '8000k' }, '1080p60': { br: '12000k' }, '720p30-low': { br: '2500k' }, '1080p30-low': { br: '4500k' } },
       youtubeConnected: false,
     },
   },
