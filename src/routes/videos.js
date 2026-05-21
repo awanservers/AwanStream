@@ -103,6 +103,17 @@ router.get('/', (req, res) => {
 
   const youtubeConnected = !!youtubeManager.getAccount();
 
+  // Annotate each video with stream-readiness assessment for UI badges.
+  videos.forEach((v) => {
+    if (v.status === 'ready') {
+      v._readiness = { level: 'ready', reasons: ['stream-ready'] };
+    } else if (v.status === 'uploaded') {
+      v._readiness = transcoder.assessStreamReadiness(v);
+    } else {
+      v._readiness = null;
+    }
+  });
+
   res.render('videos', {
     videos, folders, currentFolder, unfolderedCount,
     page, perPage, totalPages, totalCount,
@@ -141,8 +152,19 @@ router.post('/upload', (req, res) => {
       try {
         const info = transcoder.probeVideoInfo(uploadedPath);
         if (info.duration || info.width || info.height || info.fps || info.audioCodec !== undefined) {
-          db.prepare(`UPDATE videos SET duration_seconds=?, src_width=?, src_height=?, src_fps=?, has_audio=? WHERE id=?`)
-            .run(info.duration, info.width, info.height, info.fps, info.audioCodec ? 1 : 0, videoId);
+          db.prepare(`UPDATE videos SET duration_seconds=?, src_width=?, src_height=?, src_fps=?, has_audio=?,
+            gop_seconds=?, video_bitrate_kbps=? WHERE id=?`)
+            .run(info.duration, info.width, info.height, info.fps,
+              info.audioCodec ? 1 : 0, info.gopSeconds, info.videoBitrateKbps, videoId);
+        }
+        // Auto-ready: if codec is H.264 + AAC and GOP ≤ 2.5s, mark as ready
+        // immediately so user can stream without Prepare.
+        const isH264 = info.videoCodec === 'h264';
+        const isAac = !info.audioCodec || info.audioCodec === 'aac';
+        const gopOk = info.gopSeconds != null && info.gopSeconds <= 2.5;
+        if (isH264 && isAac && gopOk) {
+          db.prepare("UPDATE videos SET status='ready' WHERE id=? AND status='uploaded'")
+            .run(videoId);
         }
       } catch (_) {}
       try {
@@ -260,8 +282,18 @@ router.post('/chunked/:uploadId/finalize', express.json(), (req, res) => {
       try {
         const info = transcoder.probeVideoInfo(filePath);
         if (info.duration || info.width || info.height || info.fps) {
-          db.prepare(`UPDATE videos SET duration_seconds=?, src_width=?, src_height=?, src_fps=? WHERE id=?`)
-            .run(info.duration, info.width, info.height, info.fps, videoId);
+          db.prepare(`UPDATE videos SET duration_seconds=?, src_width=?, src_height=?, src_fps=?, has_audio=?,
+            gop_seconds=?, video_bitrate_kbps=? WHERE id=?`)
+            .run(info.duration, info.width, info.height, info.fps,
+              info.audioCodec ? 1 : 0, info.gopSeconds, info.videoBitrateKbps, videoId);
+        }
+        // Auto-ready: if codec is H.264 + AAC and GOP ≤ 2.5s, mark as ready.
+        const isH264 = info.videoCodec === 'h264';
+        const isAac = !info.audioCodec || info.audioCodec === 'aac';
+        const gopOk = info.gopSeconds != null && info.gopSeconds <= 2.5;
+        if (isH264 && isAac && gopOk) {
+          db.prepare("UPDATE videos SET status='ready' WHERE id=? AND status='uploaded'")
+            .run(videoId);
         }
       } catch (_) {}
       try {

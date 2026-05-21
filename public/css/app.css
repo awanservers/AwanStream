@@ -434,6 +434,7 @@ select { cursor: pointer; }
 .badge-running { background: rgba(48, 164, 108, 0.2); color: var(--ok); }
 .badge-idle { background: rgba(139, 147, 167, 0.15); color: var(--muted); }
 .badge-error { background: rgba(229, 72, 77, 0.2); color: var(--danger); }
+.badge-warn { background: rgba(245, 165, 36, 0.2); color: var(--warn); }
 
 /* ----- Alerts ----- */
 

@@ -65,13 +65,17 @@ function probeVideoInfo(filePath) {
   const r = spawnSync('ffprobe', [
     '-v', 'error',
     '-select_streams', 'v:0',
-    '-show_entries', 'stream=width,height,r_frame_rate,codec_name',
-    '-show_entries', 'format=duration',
+    '-show_entries', 'stream=width,height,r_frame_rate,codec_name,bit_rate',
+    '-show_entries', 'format=duration,bit_rate',
     '-of', 'json',
     filePath,
   ], { encoding: 'utf8', timeout: 30000 });
 
-  const out = { width: null, height: null, fps: null, duration: null, videoCodec: null, audioCodec: null };
+  const out = {
+    width: null, height: null, fps: null, duration: null,
+    videoCodec: null, audioCodec: null,
+    videoBitrateKbps: null, gopSeconds: null,
+  };
   if (r.status !== 0) return out;
 
   try {
@@ -81,6 +85,10 @@ function probeVideoInfo(filePath) {
       out.width = s.width || null;
       out.height = s.height || null;
       out.videoCodec = s.codec_name || null;
+      if (s.bit_rate) {
+        const br = Number(s.bit_rate);
+        if (Number.isFinite(br) && br > 0) out.videoBitrateKbps = Math.round(br / 1000);
+      }
       if (s.r_frame_rate) {
         const [num, den] = s.r_frame_rate.split('/').map(Number);
         if (den && den > 0) {
@@ -92,6 +100,11 @@ function probeVideoInfo(filePath) {
     if (j.format && j.format.duration) {
       const d = parseFloat(j.format.duration);
       out.duration = Number.isFinite(d) && d > 0 ? d : null;
+    }
+    // Fallback to format-level bitrate if stream-level was missing.
+    if (!out.videoBitrateKbps && j.format && j.format.bit_rate) {
+      const br = Number(j.format.bit_rate);
+      if (Number.isFinite(br) && br > 0) out.videoBitrateKbps = Math.round(br / 1000);
     }
   } catch (_) {}
 
@@ -107,7 +120,51 @@ function probeVideoInfo(filePath) {
     out.audioCodec = ra.stdout.trim();
   }
 
+  // Measure GOP interval by sampling keyframe positions in the first
+  // ~30 seconds of video. Cheap because we read packet metadata only,
+  // not decode. Returns the *largest* gap between consecutive keyframes,
+  // which is what RTMP platforms use to validate keyframe interval.
+  out.gopSeconds = measureGopSeconds(filePath);
+
   return out;
+}
+
+/**
+ * Measure the largest gap between consecutive keyframes in the first
+ * ~30 seconds of the file. Returns seconds (float) or null if probing
+ * fails / can't find at least 2 keyframes.
+ */
+function measureGopSeconds(filePath) {
+  const { spawnSync } = require('child_process');
+  const r = spawnSync('ffprobe', [
+    '-v', 'error',
+    '-read_intervals', '%+30',  // first 30 seconds only
+    '-select_streams', 'v:0',
+    '-show_entries', 'packet=pts_time,flags',
+    '-of', 'csv=print_section=0',
+    filePath,
+  ], { encoding: 'utf8', timeout: 30000 });
+  if (r.status !== 0) return null;
+
+  const keyframeTimes = [];
+  for (const line of r.stdout.split('\n')) {
+    // Format: "pts_time,flags" e.g. "0.000000,K_" or "1.040000,__"
+    const parts = line.split(',');
+    if (parts.length < 2) continue;
+    const t = parseFloat(parts[0]);
+    const flags = parts[1] || '';
+    if (Number.isFinite(t) && /K/.test(flags)) {
+      keyframeTimes.push(t);
+    }
+  }
+  if (keyframeTimes.length < 2) return null;
+
+  let maxGap = 0;
+  for (let i = 1; i < keyframeTimes.length; i++) {
+    const gap = keyframeTimes[i] - keyframeTimes[i - 1];
+    if (gap > maxGap) maxGap = gap;
+  }
+  return maxGap > 0 ? Math.round(maxGap * 100) / 100 : null;
 }
 
 // Validate whether a video file is stream-ready (H.264 + AAC).
@@ -129,6 +186,58 @@ function validateCodec(filePath) {
   }
 
   return { ok: issues.length === 0, issues, info };
+}
+
+/**
+ * Assess how stream-ready a video is, based on cached probe data from the
+ * `videos` table (no disk I/O). Used by the UI to surface a transparent
+ * compliance badge so users know whether they can stream as-is.
+ *
+ * Levels:
+ *   'ready'    — fully compliant, can stream in Copy mode without warnings
+ *   'ok'       — codec ok but GOP/bitrate suboptimal; will work, may warn
+ *   'needs-prepare' — wrong codec or huge GOP; Copy mode will fail / look bad
+ *   'unknown'  — probe data missing; safe default is to require Prepare
+ *
+ * @param {object} video - row from `videos` table
+ * @returns {{ level, reasons: string[] }}
+ */
+function assessStreamReadiness(video) {
+  if (!video) return { level: 'unknown', reasons: ['data tidak tersedia'] };
+
+  // No probe data yet (legacy row or upload still in flight).
+  const noProbe = !video.duration_seconds && video.gop_seconds == null;
+  if (noProbe) return { level: 'unknown', reasons: ['belum di-probe'] };
+
+  const reasons = [];
+  let level = 'ready';
+
+  // GOP check (most-flagged warning by RTMP platforms).
+  const gop = Number(video.gop_seconds);
+  if (Number.isFinite(gop) && gop > 0) {
+    if (gop > 4) {
+      level = 'needs-prepare';
+      reasons.push(`keyframe interval ${gop}s (butuh ≤ 2s untuk YouTube/Twitch)`);
+    } else if (gop > 2.5) {
+      if (level === 'ready') level = 'ok';
+      reasons.push(`keyframe interval ${gop}s (suboptimal, ideal 2s)`);
+    }
+  }
+
+  // Bitrate sanity check — way too low or way too high.
+  const br = Number(video.video_bitrate_kbps);
+  if (Number.isFinite(br) && br > 0) {
+    if (br > 15000) {
+      if (level === 'ready') level = 'ok';
+      reasons.push(`bitrate ${br}k (over-encoded, bandwidth waste)`);
+    } else if (br < 1000) {
+      if (level === 'ready') level = 'ok';
+      reasons.push(`bitrate ${br}k (very low, kualitas kurang)`);
+    }
+  }
+
+  if (reasons.length === 0) reasons.push('codec H.264 + AAC, keyframe ok');
+  return { level, reasons };
 }
 
 function getProgress(videoId) {
@@ -375,5 +484,6 @@ function generateThumbnail(videoPath, videoId, opts = {}) {
 
 module.exports = {
   presets, start, cancel, isRunning, reconcileOnBoot, tailLog,
-  getProgress, probeDuration, probeVideoInfo, validateCodec, generateThumbnail,
+  getProgress, probeDuration, probeVideoInfo, validateCodec,
+  generateThumbnail, assessStreamReadiness, measureGopSeconds,
 };

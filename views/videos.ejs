@@ -127,6 +127,15 @@
               <% } else { %>
                 <span class="badge badge-idle"><%= v.status %></span>
               <% } %>
+              <% if (v._readiness && v.status === 'uploaded') { %>
+                <% if (v._readiness.level === 'ready') { %>
+                  <span class="badge badge-running" title="<%= v._readiness.reasons.join(' · ') %>">✓ stream-ready</span>
+                <% } else if (v._readiness.level === 'ok') { %>
+                  <span class="badge badge-warn" title="<%= v._readiness.reasons.join(' · ') %>">⚠ suboptimal</span>
+                <% } else if (v._readiness.level === 'needs-prepare') { %>
+                  <span class="badge badge-error" title="<%= v._readiness.reasons.join(' · ') %>">✗ needs Prepare</span>
+                <% } %>
+              <% } %>
             </td>
             <td class="actions">
               <% if (v.status === 'transcoding') { %>

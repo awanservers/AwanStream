@@ -175,6 +175,8 @@ function ensureSchema() {
   addv('thumbnail', 'TEXT', 'NULL');
   addv('loop_job_id', 'TEXT', 'NULL');
   addv('has_audio', 'INTEGER', 'NULL');
+  addv('gop_seconds', 'REAL', 'NULL');         // measured keyframe interval (sec)
+  addv('video_bitrate_kbps', 'INTEGER', 'NULL'); // measured average video bitrate
 
   // Playlist migrations.
   const pcols = db.prepare('PRAGMA table_info(playlists)').all().map((c) => c.name);
