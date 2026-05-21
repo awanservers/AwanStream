@@ -5,7 +5,7 @@ Self-hosted web app untuk live streaming video pre-recorded ke platform RTMP (Yo
 ## Fitur
 
 - **Library** — Video & audio library, folder organizer, thumbnail auto-generate, capture frame custom, chunked upload dengan resume (cocok untuk koneksi lambat), import dari Google Drive / Mega / MediaFire
-- **Prepare** — transcode video sekali jadi stream-ready (H.264 + AAC + GOP 2s), 4 preset (720p30 → 1080p60), progress + ETA real-time
+- **Prepare** — transcode video sekali jadi stream-ready (H.264 + AAC + GOP 2s), 6 preset (720p30 → 1080p60 + low-bandwidth variants), bitrate sesuai rekomendasi YouTube, progress + ETA real-time. Video yang sudah H.264 + AAC + GOP ≤ 2s otomatis `ready` tanpa Prepare
 - **Loop tool** — perpanjang clip pendek (8 detik) jadi panjang (sampai 24 jam) untuk 24/7 stream / YouTube upload, smooth crossfade atau fast copy mode, audio overlay opsional
 - **Streaming** — single video atau playlist (sequential / shuffle), audio overlay live mix, auto-retry exponential backoff, health check stale stream, scheduled streaming, stream history
 - **YouTube Upload** — OAuth2, resumable upload, progress real-time, cancel mid-upload (cocok untuk VPS bandwidth besar — file 30 GB selesai dalam menit)
@@ -84,8 +84,9 @@ Semua user punya akses admin penuh (no RBAC). Multi-admin model.
 
 | Gejala | Solusi |
 |--------|--------|
-| Codec validation error saat Start | Jalankan **Prepare** dulu (Copy mode butuh H.264 + AAC) |
-| YouTube reject keyframe interval > 4s | Prepare mengatur GOP 2s — pakai Prepare |
+| Codec validation error saat Start | Jalankan **Prepare** dulu (Copy mode butuh H.264 + AAC + GOP ≤ 2s) |
+| YouTube reject keyframe interval > 4s | Prepare mengatur GOP 2s — video dari CapCut/Filmora biasa GOP 5s, perlu Prepare |
+| YouTube warning "bitrate terlalu rendah" | Re-Prepare dengan preset standard (bukan `-low`). Preset default sudah sesuai rekomendasi YouTube |
 | Upload "network error" di koneksi lambat | Sudah dihandle via chunked + resume otomatis |
 | Stream stuck "running" setelah crash | Restart app — `reconcileOnBoot()` reset state stale |
 | YouTube OAuth "redirect_uri_mismatch" | `.env` `YOUTUBE_REDIRECT_URI` harus match Google Cloud Console |
