@@ -3,6 +3,11 @@ services:
     image: ${DOCKER_IMAGE:-awanstream:local}
     container_name: awanstream
     restart: unless-stopped
+    # Allocate a TTY so Node.js uses line-buffered stdout. Without this,
+    # logs are block-buffered (4 KB) and only appear in `docker logs` after
+    # the buffer fills up — confusing because requests look like they don't
+    # generate any output.
+    tty: true
     ports:
       - "${PORT:-7575}:7575"
     env_file: .env
