@@ -195,7 +195,25 @@ const pages = [
     locals: {
       ...common,
       currentUser: { id: 1, username: 'admin' },
-      user: { id: 1, username: 'admin', created_at: '2026-05-11 10:00:00' },
+      user: {
+        id: 1, username: 'admin',
+        created_at: '2026-05-11 10:00:00',
+        last_login_at: '2026-05-19 08:30:00',
+        last_login_ip: '127.0.0.1',
+      },
+      stats: {
+        videos: 12,
+        streamSessions: 47,
+        streamSeconds: 36 * 3600 + 25 * 60,
+        runningStreams: 1,
+        storageBytes: 4.2 * 1024 * 1024 * 1024,
+      },
+      youtube: {
+        connected: true,
+        channelTitle: 'My Cozy Channel',
+        channelId: 'UCabc',
+        connectedAt: '2026-05-14 10:00:00',
+      },
     },
   },
   {

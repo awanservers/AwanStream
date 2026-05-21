@@ -2,10 +2,112 @@
   title: 'Profile',
   activeNav: 'profile',
   pageTitle: 'Profile',
-  pageSubtitle: 'Kelola akun & password kamu sendiri.',
+  pageSubtitle: 'Kelola akun & lihat aktivitas streaming kamu.',
 }) %>
 <%- include('partials/flash', { error, notice }) %>
 
+<%
+  function fmtBytes(n) {
+    if (!n || n < 1024) return (n || 0) + ' B';
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+    if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + ' MB';
+    return (n / 1024 / 1024 / 1024).toFixed(2) + ' GB';
+  }
+  function fmtHours(sec) {
+    if (!sec) return '0h';
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    if (h === 0) return m + 'm';
+    return h + 'h ' + (m > 0 ? m + 'm' : '');
+  }
+%>
+
+<!-- Hero card -->
+<section class="card profile-hero">
+  <div class="avatar profile-avatar"><%= user.username.charAt(0).toUpperCase() %></div>
+  <div class="profile-hero-info">
+    <h2>@<%= user.username %></h2>
+    <div class="profile-hero-meta">
+      <span class="badge badge-running">Admin</span>
+      <span class="muted small">Member sejak <%= formatTime(user.created_at) %></span>
+    </div>
+    <% if (user.last_login_at) { %>
+      <p class="muted small profile-last-login">
+        Last login: <%= formatTime(user.last_login_at) %>
+        <% if (user.last_login_ip) { %> · <span class="mono"><%= user.last_login_ip %></span><% } %>
+      </p>
+    <% } %>
+  </div>
+</section>
+
+<!-- Activity stats -->
+<div class="stat-grid stat-grid-4" style="margin-top:1rem">
+  <a href="/videos" class="stat-card stat-card-plain">
+    <div class="stat-icon stat-icon-blue">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="14" height="14" rx="2"/><path d="M22 7l-6 5 6 5V7z"/></svg>
+    </div>
+    <div class="stat-body">
+      <div class="stat-num"><%= stats.videos %></div>
+      <div class="stat-label">Videos</div>
+    </div>
+  </a>
+
+  <a href="/history" class="stat-card stat-card-plain">
+    <div class="stat-icon stat-icon-purple">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12a7 7 0 0 1 14 0"/><path d="M2 12a10 10 0 0 1 20 0"/><circle cx="12" cy="12" r="2"/></svg>
+    </div>
+    <div class="stat-body">
+      <div class="stat-num"><%= stats.streamSessions %></div>
+      <div class="stat-label">Stream sessions</div>
+    </div>
+    <% if (stats.runningStreams > 0) { %><span class="stat-live">LIVE</span><% } %>
+  </a>
+
+  <div class="stat-card stat-card-plain">
+    <div class="stat-icon stat-icon-teal">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+    </div>
+    <div class="stat-body">
+      <div class="stat-num"><%= fmtHours(stats.streamSeconds) %></div>
+      <div class="stat-label">Total streaming time</div>
+    </div>
+  </div>
+
+  <div class="stat-card stat-card-plain">
+    <div class="stat-icon stat-icon-green">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3"/></svg>
+    </div>
+    <div class="stat-body">
+      <div class="stat-num"><%= fmtBytes(stats.storageBytes) %></div>
+      <div class="stat-label">Library storage</div>
+    </div>
+  </div>
+</div>
+
+<!-- Linked services -->
+<h3 class="section-heading" style="margin-top:1.5rem">Linked services</h3>
+<div class="card profile-service">
+  <div class="profile-service-icon profile-service-icon-yt">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+  </div>
+  <div class="profile-service-info">
+    <div class="profile-service-title">YouTube</div>
+    <% if (youtube.connected) { %>
+      <div class="muted small">
+        Connected as <strong><%= youtube.channelTitle %></strong>
+        <% if (youtube.connectedAt) { %> · since <%= formatTime(youtube.connectedAt) %><% } %>
+      </div>
+    <% } else { %>
+      <div class="muted small">Belum terhubung — connect untuk auto-upload video.</div>
+    <% } %>
+  </div>
+  <a href="/youtube" class="btn btn-sm">
+    <%= youtube.connected ? 'Manage' : 'Connect' %>
+  </a>
+</div>
+
+<!-- Account & password -->
+<h3 class="section-heading" style="margin-top:1.5rem">Account settings</h3>
 <div class="profile-grid">
   <section class="card">
     <header class="card-header">
@@ -17,7 +119,7 @@
           <input name="username" value="<%= user.username %>"
                  minlength="3" maxlength="32" pattern="[a-zA-Z0-9_.\-]+" required>
         </label>
-        <p class="muted small">Dibuat: <%= formatTime(user.created_at) %></p>
+        <p class="muted small">Username dipakai untuk login. Hanya huruf, angka, dan <span class="mono">_ . -</span></p>
         <div class="form-actions">
           <button type="submit" class="btn btn-primary">Simpan</button>
         </div>

@@ -194,6 +194,16 @@ function ensureSchema() {
   adda('loudness_range', 'REAL', 'NULL');      // measured LRA (LU)
   adda('normalized', 'INTEGER NOT NULL', '0'); // 1 if file has been loudness-normalized
 
+  // Users migrations: track last successful login for the profile page.
+  const ucols = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
+  const addu = (name, type, def) => {
+    if (!ucols.includes(name)) {
+      db.exec(`ALTER TABLE users ADD COLUMN ${name} ${type} DEFAULT ${def}`);
+    }
+  };
+  addu('last_login_at', 'DATETIME', 'NULL');
+  addu('last_login_ip', 'TEXT', 'NULL');
+
   // One-time cleanup: streams.audio_id used to reference videos(id) during
   // early development of the Audio Overlay feature. It now references
   // audio_tracks(id). Clear any stale values that would point to videos which

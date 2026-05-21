@@ -288,6 +288,48 @@ h2 { margin-top: 2rem; border-bottom: 1px solid var(--border); padding-bottom: 0
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   gap: 1rem;
 }
+
+/* Profile hero card — large avatar + meta. */
+.profile-hero {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  padding: 1.25rem 1.5rem;
+}
+.profile-avatar {
+  width: 72px; height: 72px;
+  font-size: 1.8rem;
+  border-radius: 50%;
+}
+.profile-hero-info { display: flex; flex-direction: column; gap: 0.35rem; min-width: 0; flex: 1; }
+.profile-hero-info h2 { margin: 0; font-size: 1.4rem; }
+.profile-hero-meta {
+  display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;
+}
+.profile-last-login { margin: 0.2rem 0 0; }
+
+/* Linked-services row card. */
+.profile-service {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.9rem 1.1rem;
+}
+.profile-service-icon {
+  width: 40px; height: 40px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 8px;
+  flex-shrink: 0;
+  background: rgba(79, 140, 255, 0.12);
+  color: var(--primary);
+}
+.profile-service-icon-yt {
+  background: rgba(255, 0, 0, 0.12);
+  color: #ff4444;
+}
+.profile-service-info { flex: 1; min-width: 0; }
+.profile-service-title { font-weight: 600; margin-bottom: 0.15rem; }
+
 .form-stack {
   display: flex;
   flex-direction: column;

@@ -83,6 +83,14 @@ router.post('/login', loginLimiter, (req, res) => {
   }
   // Successful login — clear failure counter.
   if (req.rateLimit) req.rateLimit.reset();
+  // Track last login for the profile page (non-critical — best effort).
+  try {
+    const ip = req.rateLimit ? req.rateLimit.key
+      : (req.ip || req.connection?.remoteAddress || '-').replace(/^::ffff:/, '');
+    db.prepare(`UPDATE users
+      SET last_login_at=CURRENT_TIMESTAMP, last_login_ip=?
+      WHERE id=?`).run(ip, user.id);
+  } catch (_) {}
   req.session.userId = user.id;
   req.session.username = user.username;
   res.redirect('/');

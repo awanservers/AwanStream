@@ -2,6 +2,7 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const { db } = require('../db');
+const youtubeManager = require('../youtubeManager');
 
 const router = express.Router();
 
@@ -16,12 +17,43 @@ function validateUsername(name) {
 }
 
 router.get('/', (req, res) => {
-  const user = db.prepare(
-    'SELECT id, username, created_at FROM users WHERE id=?'
-  ).get(req.session.userId);
+  const user = db.prepare(`SELECT id, username, created_at, last_login_at, last_login_ip
+    FROM users WHERE id=?`).get(req.session.userId);
   if (!user) return res.redirect('/logout');
+
+  // Activity stats — shared across all admins (single-tenant model).
+  const stats = {
+    videos: db.prepare('SELECT COUNT(*) AS n FROM videos').get().n,
+    streamSessions: db.prepare('SELECT COUNT(*) AS n FROM stream_history').get().n,
+    streamSeconds: db.prepare(
+      'SELECT COALESCE(SUM(duration_seconds), 0) AS s FROM stream_history'
+    ).get().s,
+    runningStreams: db.prepare(
+      "SELECT COUNT(*) AS n FROM streams WHERE status='running'"
+    ).get().n,
+    storageBytes: db.prepare(
+      'SELECT COALESCE(SUM(size_bytes), 0) AS s FROM videos'
+    ).get().s,
+  };
+
+  // Linked YouTube account (if any).
+  let youtube = { connected: false };
+  try {
+    const acc = youtubeManager.getAccount();
+    if (acc) {
+      youtube = {
+        connected: true,
+        channelTitle: acc.channel_title,
+        channelId: acc.channel_id,
+        connectedAt: acc.created_at,
+      };
+    }
+  } catch (_) {}
+
   res.render('profile', {
     user,
+    stats,
+    youtube,
     error: req.query.error || null,
     notice: req.query.notice || null,
   });
