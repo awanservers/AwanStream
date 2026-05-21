@@ -107,47 +107,11 @@
 </div>
 
 <!-- Account & password -->
-<h3 class="section-heading" style="margin-top:1.5rem">Account settings</h3>
-<div class="profile-grid">
-  <section class="card">
-    <header class="card-header">
-      <h2>Account info</h2>
-    </header>
-    <div class="card-body">
-      <form method="POST" action="/profile" class="form-stack">
-        <label>Username
-          <input name="username" value="<%= user.username %>"
-                 minlength="3" maxlength="32" pattern="[a-zA-Z0-9_.\-]+" required>
-        </label>
-        <p class="muted small">Username dipakai untuk login. Hanya huruf, angka, dan <span class="mono">_ . -</span></p>
-        <div class="form-actions">
-          <button type="submit" class="btn btn-primary">Simpan</button>
-        </div>
-      </form>
-    </div>
-  </section>
-
-  <section class="card">
-    <header class="card-header">
-      <h2>Change password</h2>
-    </header>
-    <div class="card-body">
-      <form method="POST" action="/profile/password" class="form-stack">
-        <label>Password sekarang
-          <input type="password" name="current_password" autocomplete="current-password" required>
-        </label>
-        <label>Password baru
-          <input type="password" name="new_password" minlength="6" autocomplete="new-password" required>
-        </label>
-        <label>Konfirmasi password baru
-          <input type="password" name="confirm_password" minlength="6" autocomplete="new-password" required>
-        </label>
-        <div class="form-actions">
-          <button type="submit" class="btn btn-primary">Update password</button>
-        </div>
-      </form>
-    </div>
-  </section>
+<div class="profile-actions-row">
+  <p class="muted small">
+    Mau ubah username atau password? Kelola di
+    <a href="/users">User management</a>.
+  </p>
 </div>
 
 <%- include('partials/footer') %>

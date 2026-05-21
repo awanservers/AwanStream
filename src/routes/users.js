@@ -28,6 +28,61 @@ router.get('/', (req, res) => {
   });
 });
 
+// --- Self-service routes — managed inline from the users table ---
+
+// Edit own username.
+router.post('/me', (req, res) => {
+  const newUsername = (req.body.username || '').trim();
+  const back = (msg, isError = false) =>
+    res.redirect('/users?' + (isError ? 'error=' : 'notice=') + encodeURIComponent(msg));
+
+  const err = validateUsername(newUsername);
+  if (err) return back(err, true);
+
+  const current = db.prepare('SELECT username FROM users WHERE id=?').get(req.session.userId);
+  if (!current) return res.redirect('/logout');
+  if (current.username === newUsername) return back('Tidak ada perubahan.');
+
+  const taken = db.prepare(
+    'SELECT 1 FROM users WHERE username=? AND id<>?'
+  ).get(newUsername, req.session.userId);
+  if (taken) return back('Username sudah dipakai user lain.', true);
+
+  db.prepare('UPDATE users SET username=? WHERE id=?').run(newUsername, req.session.userId);
+  req.session.username = newUsername; // keep sidebar in sync immediately
+  return back('Username diperbarui.');
+});
+
+// Change own password (must verify current).
+router.post('/me/password', (req, res) => {
+  const current = req.body.current_password || '';
+  const next = req.body.new_password || '';
+  const confirm = req.body.confirm_password || '';
+
+  const back = (msg, isError = false) =>
+    res.redirect('/users?' + (isError ? 'error=' : 'notice=') + encodeURIComponent(msg));
+
+  if (!current || !next) return back('Isi semua field password.', true);
+  if (next.length < 6)   return back('Password baru minimal 6 karakter.', true);
+  if (next !== confirm)  return back('Konfirmasi password tidak cocok.', true);
+  if (current === next)  return back('Password baru harus berbeda dari yang lama.', true);
+
+  const user = db.prepare(
+    'SELECT id, password_hash FROM users WHERE id=?'
+  ).get(req.session.userId);
+  if (!user) return res.redirect('/logout');
+
+  if (!bcrypt.compareSync(current, user.password_hash)) {
+    return back('Password sekarang salah.', true);
+  }
+
+  const hash = bcrypt.hashSync(next, 10);
+  db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(hash, user.id);
+  return back('Password berhasil diubah.');
+});
+
+// --- Admin actions on other users ---
+
 // Create a new admin user.
 router.post('/', (req, res) => {
   const username = (req.body.username || '').trim();

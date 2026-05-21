@@ -21,13 +21,14 @@
       </thead>
       <tbody>
         <% users.forEach(u => { %>
+          <% const isMe = u.id === currentUser.id; %>
           <tr>
             <td>
               <div class="user-row">
                 <div class="avatar avatar-sm"><%= u.username.charAt(0).toUpperCase() %></div>
                 <div>
                   <strong><%= u.username %></strong>
-                  <% if (u.id === currentUser.id) { %>
+                  <% if (isMe) { %>
                     <span class="badge badge-running" style="margin-left:0.4rem">you</span>
                   <% } %>
                 </div>
@@ -35,18 +36,26 @@
             </td>
             <td class="muted small"><%= formatTime(u.created_at) %></td>
             <td class="actions">
-              <button type="button" class="btn btn-sm"
-                      data-open-modal="reset-pw"
-                      data-user-id="<%= u.id %>"
-                      data-username="<%= u.username %>">Reset password</button>
-              <% if (u.id !== currentUser.id && totalUsers > 1) { %>
-                <button type="button" class="btn-icon btn-icon-danger"
-                        data-open-modal="delete-user"
+              <% if (isMe) { %>
+                <button type="button" class="btn btn-sm"
+                        data-open-modal="edit-me"
+                        data-username="<%= u.username %>">Edit username</button>
+                <button type="button" class="btn btn-sm"
+                        data-open-modal="change-my-pw">Change password</button>
+              <% } else { %>
+                <button type="button" class="btn btn-sm"
+                        data-open-modal="reset-pw"
                         data-user-id="<%= u.id %>"
-                        data-username="<%= u.username %>"
-                        title="Delete user">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
-                </button>
+                        data-username="<%= u.username %>">Reset password</button>
+                <% if (totalUsers > 1) { %>
+                  <button type="button" class="btn-icon btn-icon-danger"
+                          data-open-modal="delete-user"
+                          data-user-id="<%= u.id %>"
+                          data-username="<%= u.username %>"
+                          title="Delete user">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+                  </button>
+                <% } %>
               <% } %>
             </td>
           </tr>
@@ -132,6 +141,54 @@
   </div>
 </dialog>
 
+<dialog id="edit-me" class="modal modal-sm">
+  <div class="modal-card">
+    <header class="modal-header">
+      <h2>Edit username</h2>
+      <button type="button" class="modal-close" data-close-modal aria-label="Close">×</button>
+    </header>
+    <form method="POST" action="/users/me">
+      <div class="modal-body form-stack">
+        <label>Username baru
+          <input name="username" id="edit-me-username"
+                 minlength="3" maxlength="32" pattern="[a-zA-Z0-9_.\-]+" required>
+        </label>
+        <p class="muted small">Username dipakai untuk login. Hanya huruf, angka, dan <span class="mono">_ . -</span></p>
+      </div>
+      <footer class="modal-footer">
+        <button type="button" class="btn" data-close-modal>Batal</button>
+        <button type="submit" class="btn btn-primary">Simpan</button>
+      </footer>
+    </form>
+  </div>
+</dialog>
+
+<dialog id="change-my-pw" class="modal modal-sm">
+  <div class="modal-card">
+    <header class="modal-header">
+      <h2>Change my password</h2>
+      <button type="button" class="modal-close" data-close-modal aria-label="Close">×</button>
+    </header>
+    <form method="POST" action="/users/me/password">
+      <div class="modal-body form-stack">
+        <label>Password sekarang
+          <input type="password" name="current_password" autocomplete="current-password" required>
+        </label>
+        <label>Password baru
+          <input type="password" name="new_password" minlength="6" autocomplete="new-password" required>
+        </label>
+        <label>Konfirmasi password baru
+          <input type="password" name="confirm_password" minlength="6" autocomplete="new-password" required>
+        </label>
+      </div>
+      <footer class="modal-footer">
+        <button type="button" class="btn" data-close-modal>Batal</button>
+        <button type="submit" class="btn btn-primary">Update password</button>
+      </footer>
+    </form>
+  </div>
+</dialog>
+
 <script>
 document.addEventListener('modal:before-open', (e) => {
   const trigger = e.detail.trigger;
@@ -151,6 +208,10 @@ document.addEventListener('modal:before-open', (e) => {
     document.getElementById('delete-user-target').textContent = name;
     document.getElementById('delete-user-form').action = '/users/' + id + '/delete';
     document.getElementById('delete-user-form').reset();
+  }
+
+  if (e.detail.id === 'edit-me') {
+    document.getElementById('edit-me-username').value = trigger.dataset.username || '';
   }
 });
 </script>
