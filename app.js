@@ -170,6 +170,33 @@ app.locals.formatTimeShort = (value) => {
   return `${shortFmt.format(d)} ${TZ_LABEL}`;
 };
 
+// Build/version info — surfaced in the UI so you can verify which container
+// is actually serving the request. Resolution order:
+//   1. APP_VERSION env (set in CI: APP_VERSION=$(git rev-parse --short HEAD))
+//   2. Dockerfile-baked /app/VERSION file (alternative for static images)
+//   3. package.json version
+//   4. 'dev' fallback
+function resolveAppVersion() {
+  const raw = process.env.APP_VERSION
+    || readVersionFile()
+    || readPackageVersion()
+    || 'dev';
+  // Long git SHAs (40 chars) are noisy in the UI — trim to short form.
+  if (/^[0-9a-f]{40}$/i.test(raw)) return raw.slice(0, 7);
+  return raw;
+}
+function readVersionFile() {
+  try { return fs.readFileSync(path.join(__dirname, 'VERSION'), 'utf8').trim(); }
+  catch (_) { return null; }
+}
+function readPackageVersion() {
+  try { return require('./package.json').version || null; }
+  catch (_) { return null; }
+}
+app.locals.appVersion = resolveAppVersion();
+app.locals.appBootedAt = new Date().toISOString();
+console.log(`AwanStream version: ${app.locals.appVersion}`);
+
 app.use(injectUser);
 
 app.use('/', authRoutes);

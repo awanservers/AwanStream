@@ -70,6 +70,9 @@
         </form>
       </div>
     </div>
+    <div class="sidebar-version" title="Booted at <%= typeof appBootedAt !== 'undefined' ? appBootedAt : '' %>">
+      v<%= typeof appVersion !== 'undefined' ? appVersion : 'dev' %>
+    </div>
   </aside>
 
   <div class="main">

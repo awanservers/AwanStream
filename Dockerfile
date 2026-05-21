@@ -22,6 +22,12 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY package*.json ./
 COPY . .
 
+# Build-time version arg — set by CI to e.g. git short SHA. Surfaced in the
+# UI sidebar so you can verify which container is actually serving requests.
+# Build with: docker build --build-arg APP_VERSION=$(git rev-parse --short HEAD)
+ARG APP_VERSION=dev
+ENV APP_VERSION=${APP_VERSION}
+
 # Use built-in `node` user (UID 1000, GID 1000) — tidak perlu buat user baru
 RUN mkdir -p db logs public/uploads public/uploads/thumbs \
     && chown -R node:node /app

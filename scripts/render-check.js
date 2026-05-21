@@ -7,6 +7,8 @@ const viewsDir = path.join(__dirname, '..', 'views');
 const common = {
   formatTime: (v) => String(v || '-'),
   formatTimeShort: (v) => String(v || '-'),
+  appVersion: 'test',
+  appBootedAt: '2026-05-11T10:00:00.000Z',
   error: null,
   notice: null,
 };
