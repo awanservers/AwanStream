@@ -144,7 +144,7 @@
                         data-video-id="<%= v.id %>"
                         data-video-title="<%= v.title %>">Details</button>
               <% } else if (v.status === 'ready') { %>
-                <button type="button" class="btn btn-link"
+                <button type="button" class="btn-icon"
                         data-open-modal="prepare"
                         data-video-id="<%= v.id %>"
                         data-video-title="<%= v.title %>"
@@ -152,7 +152,9 @@
                         data-src-height="<%= v.src_height || '' %>"
                         data-src-fps="<%= v.src_fps || '' %>"
                         data-src-bitrate="<%= v.video_bitrate_kbps || '' %>"
-                        title="Re-encode dengan preset lain">Re-Prepare</button>
+                        title="Re-Prepare">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10M23 14l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
+                </button>
               <% } else { %>
                 <button type="button" class="btn btn-primary btn-sm"
                         data-open-modal="prepare"
