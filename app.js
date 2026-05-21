@@ -43,6 +43,11 @@ scheduler.start();
 const app = express();
 const PORT = Number(process.env.PORT) || 7575;
 
+// Trust the first proxy hop (nginx/caddy) so req.ip and X-Forwarded-For
+// reflect the real client. Required for rate limiting and accurate logs
+// when deployed behind a reverse proxy. Safe with a single trusted hop.
+app.set('trust proxy', 1);
+
 if (!process.env.SESSION_SECRET) {
   console.warn('WARN: SESSION_SECRET not set. Run `node generate-secret.js` first.');
 }
