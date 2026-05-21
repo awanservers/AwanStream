@@ -121,7 +121,7 @@ body.app { display: block; }
 .user-name { font-size: 0.88rem; color: var(--text); overflow: hidden; text-overflow: ellipsis; }
 .user-role { font-size: 0.72rem; }
 
-/* Avatar dropdown menu — pure CSS toggle via hidden checkbox. */
+/* Avatar dropdown menu — floating popover that opens upward, animated. */
 .sidebar-user {
   position: relative;
   flex-direction: column;
@@ -144,22 +144,42 @@ body.app { display: block; }
   color: var(--muted);
   transition: transform 0.2s ease;
 }
+/* Chevron points right when closed, rotates to point up when menu opens. */
 .user-menu-toggle:checked ~ .sidebar-user-trigger .user-menu-chevron {
-  transform: rotate(90deg);
+  transform: rotate(-90deg);
 }
+
+/* Menu floats above the avatar trigger as a popover. Animated via
+   opacity + transform; pointer-events disabled when hidden so trigger
+   stays clickable through the menu's space. */
 .user-menu {
-  display: none;
+  position: absolute;
+  bottom: calc(100% - 1px);
+  left: 0.5rem;
+  right: 0.5rem;
+  display: flex;
   flex-direction: column;
   background: var(--panel-2);
-  border-top: 1px solid var(--border);
-  padding: 0.4rem;
-  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 0.35rem;
+  gap: 1px;
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  transform: translateY(8px);
+  pointer-events: none;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+  z-index: 25;
 }
-.user-menu-toggle:checked ~ .user-menu { display: flex; }
+.user-menu-toggle:checked ~ .user-menu {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
 .user-menu-item {
-  display: flex; align-items: center; gap: 0.6rem;
-  padding: 0.55rem 0.7rem;
-  border-radius: var(--radius);
+  display: flex; align-items: center; gap: 0.65rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 6px;
   background: transparent;
   border: none;
   color: var(--text);
@@ -171,26 +191,26 @@ body.app { display: block; }
   transition: background var(--transition), color var(--transition);
 }
 .user-menu-item:hover {
-  background: rgba(79, 140, 255, 0.1);
+  background: rgba(79, 140, 255, 0.12);
   text-decoration: none;
   color: var(--text);
 }
 .user-menu-item.active {
-  background: rgba(79, 140, 255, 0.12);
+  background: rgba(79, 140, 255, 0.15);
   color: var(--primary);
 }
 .user-menu-item svg { color: var(--muted); flex-shrink: 0; }
 .user-menu-item:hover svg { color: var(--text); }
 .user-menu-item.active svg { color: var(--primary); }
 .user-menu-item-danger:hover {
-  background: rgba(229, 72, 77, 0.1);
+  background: rgba(229, 72, 77, 0.12);
   color: var(--danger);
 }
 .user-menu-item-danger:hover svg { color: var(--danger); }
 .user-menu-divider {
   height: 1px;
   background: var(--border);
-  margin: 0.3rem 0.4rem;
+  margin: 0.3rem 0.2rem;
 }
 .user-row {
   display: flex; align-items: center; gap: 0.6rem;
@@ -614,15 +634,37 @@ dialog.modal {
   max-height: 90vh;
   border-radius: var(--radius-lg);
   overflow: visible;
-  animation: modal-in 0.15s ease-out;
+  /* Animation states managed via [open] selector + JS .closing flag for
+     graceful exit. */
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.96);
+  transition: opacity 0.18s ease, transform 0.18s ease;
 }
-@keyframes modal-in {
-  from { opacity: 0; transform: translate(-50%, -50%) scale(0.96); }
-  to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+dialog.modal[open] {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  margin: 0;
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+/* Closing state — JS sets .closing then waits for transition before .close() */
+dialog.modal.closing {
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.96);
 }
 dialog.modal::backdrop {
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(0, 0, 0, 0);
+  backdrop-filter: blur(0px);
+  transition: background 0.18s ease, backdrop-filter 0.18s ease;
+}
+dialog.modal[open]::backdrop {
+  background: rgba(0, 0, 0, 0.55);
   backdrop-filter: blur(4px);
+}
+dialog.modal.closing::backdrop {
+  background: rgba(0, 0, 0, 0);
+  backdrop-filter: blur(0px);
 }
 .modal-card {
   background: var(--panel);
@@ -660,14 +702,6 @@ dialog.modal::backdrop {
   background: var(--panel-2);
 }
 .modal-footer .btn { margin-right: 0; }
-
-/* Center the <dialog> (browser default is top) */
-dialog.modal[open] {
-  position: fixed;
-  top: 50%; left: 50%;
-  transform: translate(-50%, -50%);
-  margin: 0;
-}
 
 /* Empty state centered */
 .card.empty {

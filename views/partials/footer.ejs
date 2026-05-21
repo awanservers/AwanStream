@@ -27,9 +27,13 @@
     // data-open-modal="<id>" and data-close-modal. Emits a modal:before-open
     // custom event so pages can populate form state before the modal shows.
     (function () {
+      const ANIM_MS = 180;
+
       function open(id, trigger) {
         const dlg = document.getElementById(id);
         if (!dlg || typeof dlg.showModal !== 'function') return;
+        // Cancel any pending close animation on this dialog.
+        dlg.classList.remove('closing');
         dlg.dispatchEvent(new CustomEvent('modal:before-open', {
           detail: { id, trigger }, bubbles: true,
         }));
@@ -38,9 +42,22 @@
         }));
         dlg.showModal();
       }
+
+      // Animated close: add .closing → wait for transition → call .close().
+      // Plays the exit transition we defined in CSS.
       function close(dlg) {
-        if (dlg && typeof dlg.close === 'function') dlg.close();
+        if (!dlg || typeof dlg.close !== 'function') return;
+        if (!dlg.open) return;
+        if (dlg.classList.contains('closing')) return; // already closing
+        dlg.classList.add('closing');
+        setTimeout(() => {
+          dlg.classList.remove('closing');
+          try { dlg.close(); } catch (_) {}
+        }, ANIM_MS);
       }
+      // Expose for the confirm-dialog flow below (which needs to wait for
+      // animation before submitting the pending form).
+      window.__closeModal = close;
 
       document.addEventListener('click', (e) => {
         const openBtn = e.target.closest('[data-open-modal]');
@@ -55,7 +72,17 @@
           close(closeBtn.closest('dialog'));
           return;
         }
+        // Backdrop click — only if clicking the dialog element itself, not
+        // anything inside .modal-card.
         if (e.target.matches('dialog.modal')) close(e.target);
+      });
+
+      // ESC key triggers `cancel` event before close — intercept to animate.
+      document.addEventListener('cancel', (e) => {
+        const dlg = e.target;
+        if (!dlg || !dlg.matches('dialog.modal')) return;
+        e.preventDefault();
+        close(dlg);
       });
     })();
 
@@ -83,8 +110,11 @@
       ok.addEventListener('click', () => {
         if (!pending) return;
         pending.dataset._confirmed = '1';
-        dlg.close();
-        // HTMLFormElement.requestSubmit triggers validation + proper submit event.
+        // Animate the confirm dialog out, then submit. We can submit
+        // immediately though — UX-wise users expect the form to fire right
+        // away on confirm click. Just close gracefully in parallel.
+        if (window.__closeModal) window.__closeModal(dlg);
+        else dlg.close();
         pending.requestSubmit();
         pending = null;
       });
