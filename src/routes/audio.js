@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
 const audioManager = require('../audioManager');
+const diskCheck = require('../diskCheck');
 
 const router = express.Router();
 
@@ -38,6 +39,14 @@ router.get('/', (req, res) => {
 });
 
 router.post('/upload', (req, res) => {
+  // Pre-check disk before letting multer drain to disk.
+  const cl = Number(req.headers['content-length']) || 0;
+  if (cl > 0) {
+    try { diskCheck.ensureSpace(cl, 'Audio upload'); }
+    catch (e) {
+      return res.redirect('/audio?error=' + encodeURIComponent(e.message));
+    }
+  }
   upload.single('audio')(req, res, (err) => {
     if (err) return res.redirect('/audio?error=' + encodeURIComponent(err.message));
     if (!req.file) return res.redirect('/audio?error=No+file+uploaded');

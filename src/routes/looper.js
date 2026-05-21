@@ -2,6 +2,7 @@ const express = require('express');
 const { db } = require('../db');
 const looper = require('../looper');
 const audioManager = require('../audioManager');
+const diskCheck = require('../diskCheck');
 
 const router = express.Router();
 
@@ -102,6 +103,22 @@ router.post('/start', (req, res) => {
   }
 
   try {
+    // Disk pre-check: estimate output size from source bitrate × target seconds.
+    // Looper writes the full output file before completing, so peak usage =
+    // estimated output size. For smooth mode, transient unit file adds another
+    // ~source size during phase 1, but it's deleted before phase 2 finalizes —
+    // we still budget for it via the +20% margin.
+    const src = db.prepare(
+      'SELECT size_bytes, duration_seconds FROM videos WHERE id=?'
+    ).get(sourceVideoId);
+    if (src && src.size_bytes && src.duration_seconds && src.duration_seconds > 0) {
+      const bytesPerSec = Number(src.size_bytes) / Number(src.duration_seconds);
+      const estimated = Math.ceil(bytesPerSec * targetSeconds * 1.2);
+      try { diskCheck.ensureSpace(estimated, 'Loop'); }
+      catch (e) {
+        return res.redirect('/looper?error=' + encodeURIComponent(e.message));
+      }
+    }
     const { jobId, mode } = looper.start(sourceVideoId, targetSeconds, customTitle, {
       smooth,
       crossfadeSeconds,

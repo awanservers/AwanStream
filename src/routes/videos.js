@@ -8,6 +8,7 @@ const downloader = require('../downloader');
 const chunkUpload = require('../chunkUpload');
 const youtubeManager = require('../youtubeManager');
 const youtubeUploader = require('../youtubeUploader');
+const diskCheck = require('../diskCheck');
 
 const router = express.Router();
 const uploadDir = path.join(__dirname, '..', '..', 'public', 'uploads');
@@ -113,6 +114,15 @@ router.get('/', (req, res) => {
 });
 
 router.post('/upload', (req, res) => {
+  // Pre-check disk before letting multer drain the request body to disk.
+  // Trust content-length as a hint; final safety is multer's onError.
+  const cl = Number(req.headers['content-length']) || 0;
+  if (cl > 0) {
+    try { diskCheck.ensureSpace(cl, 'Upload'); }
+    catch (e) {
+      return res.redirect('/videos?error=' + encodeURIComponent(e.message));
+    }
+  }
   upload.single('video')(req, res, (err) => {
     if (err) return res.redirect('/videos?error=' + encodeURIComponent(err.message));
     if (!req.file) return res.redirect('/videos?error=No+file+uploaded');
@@ -160,6 +170,15 @@ function uniqueTitle(base) {
 
 // --- Chunked upload API (JSON) ---
 
+// Pre-flight disk check — used by the client to warn user BEFORE upload
+// starts (before chunked/init is called). Avoids initializing a session
+// that will fail at finalize time.
+router.get('/disk-check', (req, res) => {
+  const bytes = Number(req.query.bytes) || 0;
+  const result = diskCheck.checkSpace(bytes);
+  res.json(result);
+});
+
 // Initialize chunked upload session.
 router.post('/chunked/init', express.json(), (req, res) => {
   const { filename, fileSize } = req.body;
@@ -169,6 +188,10 @@ router.post('/chunked/init', express.json(), (req, res) => {
   if (!/\.(mp4|mkv|mov|flv|ts|webm)$/i.test(filename)) {
     return res.status(400).json({ error: 'Unsupported video format' });
   }
+  // Disk check: chunks accumulate to fileSize, then merge briefly doubles it
+  // until cleanup. Reserve 1.1× for safety.
+  try { diskCheck.ensureSpace(Number(fileSize) * 1.1, 'Upload'); }
+  catch (e) { return res.status(507).json({ error: e.message }); }
   const session = chunkUpload.initSession(filename, Number(fileSize));
   res.json(session);
 });
@@ -315,6 +338,10 @@ router.post('/import-url', (req, res) => {
   if (!url || !url.trim()) {
     return res.redirect('/videos?error=URL+is+required');
   }
+  // Size unknown until headers arrive — verify baseline disk health only.
+  // The downloader itself checks again before write start.
+  try { diskCheck.ensureSpace(0, 'Import'); }
+  catch (e) { return res.redirect('/videos?error=' + encodeURIComponent(e.message)); }
   try {
     const result = downloader.start(url.trim(), title);
     res.redirect('/videos?notice=Download+started+in+background');
@@ -334,6 +361,13 @@ router.post('/:id/prepare', (req, res) => {
   try {
     const preset = (req.body.preset || '1080p30').trim();
     const x264Preset = (req.body.x264_preset || 'medium').trim();
+    // Estimate disk need: prepare writes a new file alongside the source,
+    // then renames over it. Peak usage = source size + output size. Output
+    // can be larger than source for low-bitrate sources up-encoded; use 1.5×
+    // as a safe upper bound.
+    const video = db.prepare('SELECT size_bytes FROM videos WHERE id=?').get(req.params.id);
+    const srcSize = video ? Number(video.size_bytes) || 0 : 0;
+    if (srcSize > 0) diskCheck.ensureSpace(Math.ceil(srcSize * 1.5), 'Prepare');
     transcoder.start(req.params.id, preset, x264Preset);
     res.redirect('/videos?notice=Transcoding+started+in+background');
   } catch (e) {
@@ -398,8 +432,18 @@ router.post('/folders/:id/prepare-all', (req, res) => {
   const preset = (req.body.preset || '1080p30').trim();
   const x264Preset = (req.body.x264_preset || 'medium').trim();
   const videos = db.prepare(
-    "SELECT id FROM videos WHERE folder_id=? AND status='uploaded'"
+    "SELECT id, size_bytes FROM videos WHERE folder_id=? AND status='uploaded'"
   ).all(folderId);
+  // Bulk prepare runs jobs sequentially via transcoder, but at peak we'll
+  // have one source + one output on disk per concurrent job. Check total
+  // size as a conservative upper bound (worst case: all jobs queue and the
+  // first ones finish before later sources are processed).
+  const totalSize = videos.reduce((s, v) => s + (Number(v.size_bytes) || 0), 0);
+  try { diskCheck.ensureSpace(Math.ceil(totalSize * 1.5), 'Bulk Prepare'); }
+  catch (e) {
+    return res.redirect('/videos?folder=' + folderId +
+      '&error=' + encodeURIComponent(e.message));
+  }
   let started = 0;
   let skipped = 0;
   for (const v of videos) {

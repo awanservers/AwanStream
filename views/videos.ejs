@@ -883,6 +883,24 @@ document.addEventListener('modal:before-open', (e) => {
       };
     }
 
+    // Disk pre-check (skip for resume — server already accepted earlier).
+    if (!existing) {
+      try {
+        const r = await fetch('/videos/disk-check?bytes=' + file.size, { cache: 'no-store' });
+        if (r.ok) {
+          const dc = await r.json();
+          if (!dc.ok) {
+            const free = dc.stats ? fmtBytes(dc.stats.free) : '?';
+            label.textContent = 'disk hampir penuh: free ' + free + ' (' + (dc.reason || 'tidak cukup') + ')';
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Upload';
+            cancelBtn.textContent = 'Batal';
+            return;
+          }
+        }
+      } catch (_) { /* server unreachable — let backend reject if needed */ }
+    }
+
     try {
       if (file.size <= CHUNKED_THRESHOLD && !existing) {
         await uploadSimple(file, title, folderId);
