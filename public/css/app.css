@@ -114,8 +114,87 @@ body.app { display: block; }
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0;
 }
+.avatar-sm {
+  width: 28px; height: 28px; font-size: 0.8rem;
+}
 .user-meta { display: flex; flex-direction: column; min-width: 0; }
 .user-name { font-size: 0.88rem; color: var(--text); overflow: hidden; text-overflow: ellipsis; }
+.user-role { font-size: 0.72rem; }
+
+/* Avatar dropdown menu — pure CSS toggle via hidden checkbox. */
+.sidebar-user {
+  position: relative;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+}
+.user-menu-toggle { display: none; }
+.sidebar-user-trigger {
+  display: flex; align-items: center; gap: 0.7rem;
+  width: 100%;
+  padding: 0.85rem 1rem;
+  cursor: pointer;
+  user-select: none;
+  border-top: 1px solid var(--border);
+  transition: background var(--transition);
+}
+.sidebar-user-trigger:hover { background: var(--panel-2); }
+.user-menu-chevron {
+  margin-left: auto;
+  color: var(--muted);
+  transition: transform 0.2s ease;
+}
+.user-menu-toggle:checked ~ .sidebar-user-trigger .user-menu-chevron {
+  transform: rotate(90deg);
+}
+.user-menu {
+  display: none;
+  flex-direction: column;
+  background: var(--panel-2);
+  border-top: 1px solid var(--border);
+  padding: 0.4rem;
+  gap: 2px;
+}
+.user-menu-toggle:checked ~ .user-menu { display: flex; }
+.user-menu-item {
+  display: flex; align-items: center; gap: 0.6rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: var(--radius);
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-size: 0.88rem;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  width: 100%;
+  transition: background var(--transition), color var(--transition);
+}
+.user-menu-item:hover {
+  background: rgba(79, 140, 255, 0.1);
+  text-decoration: none;
+  color: var(--text);
+}
+.user-menu-item.active {
+  background: rgba(79, 140, 255, 0.12);
+  color: var(--primary);
+}
+.user-menu-item svg { color: var(--muted); flex-shrink: 0; }
+.user-menu-item:hover svg { color: var(--text); }
+.user-menu-item.active svg { color: var(--primary); }
+.user-menu-item-danger:hover {
+  background: rgba(229, 72, 77, 0.1);
+  color: var(--danger);
+}
+.user-menu-item-danger:hover svg { color: var(--danger); }
+.user-menu-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 0.3rem 0.4rem;
+}
+.user-row {
+  display: flex; align-items: center; gap: 0.6rem;
+}
 
 .sidebar-version {
   padding: 0.4rem 1rem 0.7rem;
@@ -182,6 +261,31 @@ h2 { margin-top: 2rem; border-bottom: 1px solid var(--border); padding-bottom: 0
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem 1rem; }
 .grid-2 .full { grid-column: 1 / -1; }
 .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+
+/* Profile/settings layout — two cards side by side, stack on mobile. */
+.profile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 1rem;
+}
+.form-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+.form-stack label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+}
 
 .stat { display: flex; flex-direction: column; align-items: flex-start; }
 .stat-label { color: var(--muted); font-size: 0.85rem; }

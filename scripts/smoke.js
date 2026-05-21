@@ -19,5 +19,7 @@ require('../src/routes/schedules');
 require('../src/routes/looper');
 require('../src/routes/audio');
 require('../src/routes/youtube');
+require('../src/routes/profile');
+require('../src/routes/users');
 console.log('modules OK');
 require('./render-check');

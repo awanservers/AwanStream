@@ -62,11 +62,30 @@
       </a>
     </nav>
     <div class="sidebar-user">
-      <div class="avatar"><%= currentUser.username.charAt(0).toUpperCase() %></div>
-      <div class="user-meta">
-        <div class="user-name">@<%= currentUser.username %></div>
-        <form method="POST" action="/logout" class="inline">
-          <button type="submit" class="btn-link">Logout</button>
+      <input type="checkbox" id="user-menu-toggle" class="user-menu-toggle">
+      <label for="user-menu-toggle" class="sidebar-user-trigger" aria-haspopup="true">
+        <div class="avatar"><%= currentUser.username.charAt(0).toUpperCase() %></div>
+        <div class="user-meta">
+          <div class="user-name">@<%= currentUser.username %></div>
+          <div class="user-role muted small">Admin</div>
+        </div>
+        <svg class="user-menu-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+      </label>
+      <div class="user-menu" role="menu">
+        <a href="/profile" class="user-menu-item <%= activePath === 'profile' ? 'active' : '' %>" role="menuitem">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          Profile
+        </a>
+        <a href="/users" class="user-menu-item <%= activePath === 'users' ? 'active' : '' %>" role="menuitem">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          Users
+        </a>
+        <div class="user-menu-divider"></div>
+        <form method="POST" action="/logout" class="inline" role="none">
+          <button type="submit" class="user-menu-item user-menu-item-danger" role="menuitem">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            Logout
+          </button>
         </form>
       </div>
     </div>

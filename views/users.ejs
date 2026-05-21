@@ -1,0 +1,158 @@
+<%- include('partials/header', {
+  title: 'Users',
+  activeNav: 'users',
+  pageTitle: 'User Management',
+  pageSubtitle: 'Semua user di tabel ini punya akses admin penuh.',
+  topbarActions: `
+    <button type="button" class="btn btn-primary" data-open-modal="add-user">+ Add user</button>
+  `,
+}) %>
+<%- include('partials/flash', { error, notice }) %>
+
+<div class="card card-flush">
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Username</th>
+          <th>Created</th>
+          <th class="col-w-actions">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% users.forEach(u => { %>
+          <tr>
+            <td>
+              <div class="user-row">
+                <div class="avatar avatar-sm"><%= u.username.charAt(0).toUpperCase() %></div>
+                <div>
+                  <strong><%= u.username %></strong>
+                  <% if (u.id === currentUser.id) { %>
+                    <span class="badge badge-running" style="margin-left:0.4rem">you</span>
+                  <% } %>
+                </div>
+              </div>
+            </td>
+            <td class="muted small"><%= formatTime(u.created_at) %></td>
+            <td class="actions">
+              <button type="button" class="btn btn-sm"
+                      data-open-modal="reset-pw"
+                      data-user-id="<%= u.id %>"
+                      data-username="<%= u.username %>">Reset password</button>
+              <% if (u.id !== currentUser.id && totalUsers > 1) { %>
+                <button type="button" class="btn-icon btn-icon-danger"
+                        data-open-modal="delete-user"
+                        data-user-id="<%= u.id %>"
+                        data-username="<%= u.username %>"
+                        title="Delete user">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+                </button>
+              <% } %>
+            </td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<dialog id="add-user" class="modal modal-sm">
+  <div class="modal-card">
+    <header class="modal-header">
+      <h2>Add user</h2>
+      <button type="button" class="modal-close" data-close-modal aria-label="Close">×</button>
+    </header>
+    <form method="POST" action="/users">
+      <div class="modal-body form-stack">
+        <label>Username
+          <input name="username" minlength="3" maxlength="32" pattern="[a-zA-Z0-9_.\-]+" required autocomplete="off">
+        </label>
+        <label>Password
+          <input type="password" name="password" minlength="6" required autocomplete="new-password">
+        </label>
+        <label>Konfirmasi password
+          <input type="password" name="confirm_password" minlength="6" required autocomplete="new-password">
+        </label>
+        <p class="muted small">User baru akan punya akses admin penuh, sama dengan kamu.</p>
+      </div>
+      <footer class="modal-footer">
+        <button type="button" class="btn" data-close-modal>Batal</button>
+        <button type="submit" class="btn btn-primary">Buat user</button>
+      </footer>
+    </form>
+  </div>
+</dialog>
+
+<dialog id="reset-pw" class="modal modal-sm">
+  <div class="modal-card">
+    <header class="modal-header">
+      <h2>Reset password</h2>
+      <button type="button" class="modal-close" data-close-modal aria-label="Close">×</button>
+    </header>
+    <form method="POST" id="reset-pw-form">
+      <div class="modal-body form-stack">
+        <p class="muted small">Reset password untuk <strong id="reset-pw-target"></strong>.</p>
+        <label>Password baru
+          <input type="password" name="new_password" minlength="6" required autocomplete="new-password">
+        </label>
+        <label>Konfirmasi password baru
+          <input type="password" name="confirm_password" minlength="6" required autocomplete="new-password">
+        </label>
+        <label>Password kamu sendiri (konfirmasi)
+          <input type="password" name="my_password" required autocomplete="current-password">
+        </label>
+      </div>
+      <footer class="modal-footer">
+        <button type="button" class="btn" data-close-modal>Batal</button>
+        <button type="submit" class="btn btn-primary">Reset</button>
+      </footer>
+    </form>
+  </div>
+</dialog>
+
+<dialog id="delete-user" class="modal modal-sm">
+  <div class="modal-card">
+    <header class="modal-header">
+      <h2>Delete user</h2>
+      <button type="button" class="modal-close" data-close-modal aria-label="Close">×</button>
+    </header>
+    <form method="POST" id="delete-user-form">
+      <div class="modal-body form-stack">
+        <p>Hapus user <strong id="delete-user-target"></strong>?</p>
+        <p class="muted small">Aksi ini tidak bisa di-undo. User akan kehilangan akses, tapi semua video / stream / playlist yang sudah ada tetap utuh (shared resource).</p>
+        <label>Password kamu sendiri (konfirmasi)
+          <input type="password" name="my_password" required autocomplete="current-password">
+        </label>
+      </div>
+      <footer class="modal-footer">
+        <button type="button" class="btn" data-close-modal>Batal</button>
+        <button type="submit" class="btn btn-danger">Hapus user</button>
+      </footer>
+    </form>
+  </div>
+</dialog>
+
+<script>
+document.addEventListener('modal:before-open', (e) => {
+  const trigger = e.detail.trigger;
+  if (!trigger) return;
+
+  if (e.detail.id === 'reset-pw') {
+    const id = trigger.dataset.userId;
+    const name = trigger.dataset.username || '';
+    document.getElementById('reset-pw-target').textContent = name;
+    document.getElementById('reset-pw-form').action = '/users/' + id + '/reset-password';
+    document.getElementById('reset-pw-form').reset();
+  }
+
+  if (e.detail.id === 'delete-user') {
+    const id = trigger.dataset.userId;
+    const name = trigger.dataset.username || '';
+    document.getElementById('delete-user-target').textContent = name;
+    document.getElementById('delete-user-form').action = '/users/' + id + '/delete';
+    document.getElementById('delete-user-form').reset();
+  }
+});
+</script>
+
+<%- include('partials/footer') %>

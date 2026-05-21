@@ -189,6 +189,28 @@ const pages = [
       },
     },
   },
+  {
+    name: 'profile',
+    file: 'profile.ejs',
+    locals: {
+      ...common,
+      currentUser: { id: 1, username: 'admin' },
+      user: { id: 1, username: 'admin', created_at: '2026-05-11 10:00:00' },
+    },
+  },
+  {
+    name: 'users',
+    file: 'users.ejs',
+    locals: {
+      ...common,
+      currentUser: { id: 1, username: 'admin' },
+      users: [
+        { id: 1, username: 'admin', created_at: '2026-05-11 10:00:00' },
+        { id: 2, username: 'partner', created_at: '2026-05-15 11:00:00' },
+      ],
+      totalUsers: 2,
+    },
+  },
 ];
 
 let fail = 0;

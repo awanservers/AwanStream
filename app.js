@@ -27,6 +27,8 @@ const historyRoutes = require('./src/routes/history');
 const looperRoutes = require('./src/routes/looper');
 const audioRoutes = require('./src/routes/audio');
 const youtubeRoutes = require('./src/routes/youtube');
+const profileRoutes = require('./src/routes/profile');
+const userRoutes = require('./src/routes/users');
 
 ensureSchema();
 streamManager.reconcileOnBoot();
@@ -455,6 +457,8 @@ app.use('/history', requireAuth, historyRoutes);
 app.use('/looper', requireAuth, looperRoutes);
 app.use('/audio', requireAuth, audioRoutes);
 app.use('/youtube', requireAuth, youtubeRoutes);
+app.use('/profile', requireAuth, profileRoutes);
+app.use('/users', requireAuth, userRoutes);
 
 app.use((err, req, res, _next) => {
   console.error(err);
