@@ -151,6 +151,7 @@
                         data-src-width="<%= v.src_width || '' %>"
                         data-src-height="<%= v.src_height || '' %>"
                         data-src-fps="<%= v.src_fps || '' %>"
+                        data-src-bitrate="<%= v.video_bitrate_kbps || '' %>"
                         title="Re-encode dengan preset lain">Re-Prepare</button>
               <% } else { %>
                 <button type="button" class="btn btn-primary btn-sm"
@@ -159,7 +160,8 @@
                         data-video-title="<%= v.title %>"
                         data-src-width="<%= v.src_width || '' %>"
                         data-src-height="<%= v.src_height || '' %>"
-                        data-src-fps="<%= v.src_fps || '' %>">
+                        data-src-fps="<%= v.src_fps || '' %>"
+                        data-src-bitrate="<%= v.video_bitrate_kbps || '' %>">
                   <%= v.status === 'error' ? 'Retry Prepare' : 'Prepare' %>
                 </button>
               <% } %>
@@ -446,13 +448,16 @@ document.addEventListener('modal:before-open', (e) => {
   const w = Number(btn.dataset.srcWidth) || 0;
   const h = Number(btn.dataset.srcHeight) || 0;
   const fps = Number(btn.dataset.srcFps) || 0;
+  const bitrate = Number(btn.dataset.srcBitrate) || 0;
   const srcInfo = document.getElementById('prepare-src-info');
   const srcBadge = document.getElementById('prepare-src-badge');
   const srcNote = document.getElementById('prepare-src-note');
   const presetSel = document.querySelector('#prepare-form select[name="preset"]');
 
   if (w && h) {
-    srcBadge.textContent = w + '×' + h + (fps ? ' @ ' + Math.round(fps) + 'fps' : '');
+    let badgeText = w + '×' + h + (fps ? ' @ ' + Math.round(fps) + 'fps' : '');
+    if (bitrate) badgeText += ' · ' + bitrate + ' kbps';
+    srcBadge.textContent = badgeText;
     srcInfo.style.display = 'flex';
 
     // Pick the best matching preset: same or lower resolution, same or lower fps.
