@@ -16,6 +16,7 @@ const audioManager = require('./src/audioManager');
 const youtubeManager = require('./src/youtubeManager');
 const youtubeUploader = require('./src/youtubeUploader');
 const chunkUpload = require('./src/chunkUpload');
+const bandwidthManager = require('./src/bandwidthManager');
 const { requireAuth, injectUser } = require('./src/auth');
 
 const authRoutes = require('./src/routes/auth');
@@ -256,11 +257,12 @@ app.get('/', requireAuth, (req, res) => {
       percent: total > 0 ? Math.round((used / total) * 100) : 0,
     };
   } catch (_) {}
+  const bandwidth = bandwidthManager.getMonthlyUsage();
 
   res.render('dashboard', {
     videoCount, readyCount, streamCount, runningCount,
     pendingSchedules, historyCount, totalBytes, recentStreams, nextSchedule,
-    system: { cpuPercent, cpuCount, loadAvg, totalMem, usedMem, memPercent, uptime, disk },
+    system: { cpuPercent, cpuCount, loadAvg, totalMem, usedMem, memPercent, uptime, disk, bandwidth },
   });
 });
 
@@ -341,10 +343,12 @@ app.get('/api/system', requireAuth, (req, res) => {
     lastNetSample = current;
   } catch (_) {}
 
+  const bandwidth = bandwidthManager.getMonthlyUsage();
+
   res.json({
     cpuPercent, cpuCount, loadAvg,
     totalMem, usedMem, memPercent,
-    uptime, disk, net,
+    uptime, disk, net, bandwidth,
     serverTime: new Date().toISOString(),
   });
 });
@@ -427,7 +431,9 @@ app.get('/api/events', (req, res) => {
     }
     if (current) lastNet = current;
 
-    return { cpuPercent, cpuCount, loadAvg, totalMem, usedMem, memPercent, uptime, disk, net };
+    const bandwidth = bandwidthManager.getMonthlyUsage();
+
+    return { cpuPercent, cpuCount, loadAvg, totalMem, usedMem, memPercent, uptime, disk, net, bandwidth };
   }
 
   function send(data) {

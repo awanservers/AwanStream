@@ -457,6 +457,18 @@ Lalu monitor dengan uptime-kuma / healthchecks.io / prometheus.
 */15 * * * * df -h /home/awan/awanstream/public/uploads | awk 'NR==2 {gsub("%",""); if ($5 > 85) print}' | mail -s "Disk alert" you@example.com
 ```
 
+### Bandwidth monitoring (vnStat)
+
+Dashboard card **BW Bulan Ini** membaca histori dari `vnstat --json`.
+
+```bash
+sudo apt install vnstat
+sudo systemctl enable --now vnstat
+vnstat
+```
+
+Kalau AwanStream berjalan di Docker, jalankan vnStat di host atau pastikan database vnStat di container ikut dipersist. Tanpa vnStat, dashboard tetap jalan dan menampilkan `N/A`.
+
 ### Process crash alert
 
 systemd `Restart=on-failure` + `journalctl` sudah cukup. Untuk alert proaktif, pakai pm2-plus, Sentry, atau tool favorit.

@@ -7,6 +7,26 @@ Versi belum di-tag — pakai tanggal sebagai penanda release.
 
 ## [Unreleased]
 
+### Fixed — Stream key secret handling
+- **Edit stream modal tidak lagi render stream key lama ke HTML** — `data-stream-key` di tombol Edit dihapus dari Single Stream dan Playlist Stream.
+- **Edit stream key sekarang opsional** — field key dikosongkan saat modal dibuka; kalau dibiarkan kosong, backend mempertahankan key lama. Isi field hanya kalau ingin mengganti key.
+
+### Added — Schedule from stream rows
+- **Tombol kalender di Single Stream dan Playlist Stream** — buat jadwal start/stop langsung dari row stream tanpa perlu klik Start manual.
+- **Badge pending schedule di row stream** — menampilkan jadwal pending terdekat dengan `formatTimeShort()`.
+- **Route baru `POST /streams/:id/schedule`** — memakai parser timezone yang sama dengan halaman `/schedules`.
+- **Sidebar disederhanakan** — item Schedules dihapus karena scheduling sekarang dibuat langsung dari halaman Streaming.
+
+### Fixed — Modal layout
+- **Form modal tidak melebar mengikuti isi input/select panjang** — grid form sekarang memakai kolom yang bisa shrink, field dibatasi ke lebar parent, dan modal body memakai vertical scroll tanpa horizontal overflow.
+- **Footer modal tidak memotong tombol action** — footer tidak ikut shrink dan tombol punya tinggi minimum stabil.
+- **Form di dalam modal sekarang ikut layout flex** — memperbaiki kasus `modal-body` mendorong footer keluar pada modal New/Edit Stream.
+
+### Added — Dashboard bandwidth via vnStat
+- **Kartu Uptime diganti menjadi BW Bulan Ini** — menampilkan total bandwidth bulan berjalan dengan breakdown `In` dan `Out`.
+- **Module baru `src/bandwidthManager.js`** — membaca `vnstat --json`, cache 60 detik, fallback aman ke `N/A` kalau vnStat belum terpasang/aktif.
+- **Payload `/api/system` dan `/api/events`** sekarang menyertakan `bandwidth` supaya kartu dashboard ikut refresh.
+
 ### Added — YouTube Upload: Restart-aware retry
 - **`reconcileOnBoot()` di `youtubeUploader.js`** — message lebih actionable: "Upload interrupted by server restart. Click Retry to upload again." (dari sebelumnya generic "upload interrupted").
 - **Retry button (orange refresh icon) di video library** — muncul kalau ada upload yang ke-interrupt server restart. Klik buka modal upload lagi (start dari awal — true resume tidak di-support karena googleapis tidak expose resumable upload URL).

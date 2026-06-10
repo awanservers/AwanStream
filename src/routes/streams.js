@@ -5,6 +5,7 @@ const { db } = require('../db');
 const streamManager = require('../streamManager');
 const transcoder = require('../transcoder');
 const audioManager = require('../audioManager');
+const { parseLocalToUTC } = require('../timezone');
 
 const router = express.Router();
 const uploadDir = path.join(__dirname, '..', '..', 'public', 'uploads');
@@ -22,7 +23,13 @@ router.get('/', (req, res) => {
 
 router.get('/single', (req, res) => {
   const streams = db.prepare(`
-    SELECT s.*, v.title AS video_title, at.title AS audio_title
+    SELECT s.*, v.title AS video_title, at.title AS audio_title,
+           (SELECT sc.start_at FROM schedules sc
+            WHERE sc.stream_id=s.id AND sc.status='pending'
+            ORDER BY sc.start_at ASC LIMIT 1) AS next_start_at,
+           (SELECT sc.stop_at FROM schedules sc
+            WHERE sc.stream_id=s.id AND sc.status='pending'
+            ORDER BY sc.start_at ASC LIMIT 1) AS next_stop_at
     FROM streams s
     LEFT JOIN videos v ON v.id = s.video_id
     LEFT JOIN audio_tracks at ON at.id = s.audio_id
@@ -33,6 +40,7 @@ router.get('/single', (req, res) => {
   const audioFiles = audioManager.listReady();
   res.render('streams-single', {
     streams, videos, audioFiles, presets: PRESETS,
+    tzLabel: process.env.TZ_LABEL || 'WIB',
     error: req.query.error || null,
     notice: req.query.notice || null,
   });
@@ -40,7 +48,13 @@ router.get('/single', (req, res) => {
 
 router.get('/playlist', (req, res) => {
   const streams = db.prepare(`
-    SELECT s.*, v.title AS video_title, p.name AS playlist_name, at.title AS audio_title
+    SELECT s.*, v.title AS video_title, p.name AS playlist_name, at.title AS audio_title,
+           (SELECT sc.start_at FROM schedules sc
+            WHERE sc.stream_id=s.id AND sc.status='pending'
+            ORDER BY sc.start_at ASC LIMIT 1) AS next_start_at,
+           (SELECT sc.stop_at FROM schedules sc
+            WHERE sc.stream_id=s.id AND sc.status='pending'
+            ORDER BY sc.start_at ASC LIMIT 1) AS next_stop_at
     FROM streams s
     LEFT JOIN videos v ON v.id = s.video_id
     LEFT JOIN playlists p ON p.id = s.playlist_id
@@ -55,6 +69,7 @@ router.get('/playlist', (req, res) => {
   const audioFiles = audioManager.listReady();
   res.render('streams-playlist', {
     streams, playlists, audioFiles, presets: PRESETS,
+    tzLabel: process.env.TZ_LABEL || 'WIB',
     error: req.query.error || null,
     notice: req.query.notice || null,
   });
@@ -142,6 +157,33 @@ router.post('/:id/stop', (req, res) => {
   res.redirect(back + '?notice=Stream+stopped');
 });
 
+router.post('/:id/schedule', (req, res) => {
+  const stream = db.prepare('SELECT id, name, playlist_id FROM streams WHERE id=?').get(req.params.id);
+  const back = stream && stream.playlist_id ? '/streams/playlist' : '/streams/single';
+  if (!stream) return res.redirect(back + '?error=Stream+not+found');
+
+  const { start_at, stop_at } = req.body;
+  if (!start_at) {
+    return res.redirect(back + '?error=Start+time+is+required');
+  }
+
+  const tz = process.env.TZ || 'Asia/Jakarta';
+  const startIso = parseLocalToUTC(start_at, tz);
+  if (!startIso) {
+    return res.redirect(back + '?error=Invalid+start+time');
+  }
+
+  const stopIso = stop_at ? parseLocalToUTC(stop_at, tz) : null;
+  if (stopIso && stopIso <= startIso) {
+    return res.redirect(back + '?error=Stop+time+must+be+after+start+time');
+  }
+
+  db.prepare(`INSERT INTO schedules (stream_id, start_at, stop_at, status)
+    VALUES (?, ?, ?, 'pending')`).run(stream.id, startIso, stopIso);
+
+  res.redirect(back + '?notice=' + encodeURIComponent('Schedule created for ' + stream.name));
+});
+
 router.post('/:id/delete', (req, res) => {
   const id = Number(req.params.id);
   const stream = db.prepare('SELECT playlist_id FROM streams WHERE id=?').get(id);
@@ -165,9 +207,10 @@ router.post('/:id/edit', (req, res) => {
   }
   const { name, video_id, playlist_id, platform, rtmp_url, stream_key, loop_video,
           re_encode, video_bitrate, keyframe_interval, preset, audio_id, audio_volume } = req.body;
-  if (!name || !rtmp_url || !stream_key) {
+  if (!name || !rtmp_url) {
     return res.redirect(back + '?error=All+fields+are+required');
   }
+  const nextStreamKey = String(stream_key || '').trim() || stream.stream_key;
   const vid = Number(video_id) || null;
   const plid = Number(playlist_id) || null;
   let effectiveVideoId = vid;
@@ -189,7 +232,7 @@ router.post('/:id/edit', (req, res) => {
     plid,
     (platform || 'custom').trim(),
     rtmp_url.trim(),
-    stream_key.trim(),
+    nextStreamKey,
     loop_video ? 1 : 0,
     re_encode === '1' ? 1 : 0,
     (video_bitrate || '4500k').trim(),

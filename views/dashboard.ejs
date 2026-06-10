@@ -4,6 +4,17 @@
   pageTitle: 'Dashboard',
   pageSubtitle: 'Ringkasan aktivitas streaming kamu.',
 }) %>
+<%
+  function fmtBytes(bytes) {
+    const n = Number(bytes) || 0;
+    if (n < 1024) return n + ' B';
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+    if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + ' MB';
+    if (n < 1024 * 1024 * 1024 * 1024) return (n / 1024 / 1024 / 1024).toFixed(1) + ' GB';
+    return (n / 1024 / 1024 / 1024 / 1024).toFixed(1) + ' TB';
+  }
+  const bw = system.bandwidth || { available: false, error: 'vnStat unavailable', totalBytes: 0, rxBytes: 0, txBytes: 0 };
+%>
 
 <!-- Main 4 cards (real-time) -->
 <div class="stat-grid stat-grid-4">
@@ -86,21 +97,21 @@
   </div>
   <div class="stat-card stat-card-sm">
     <div class="stat-body">
-      <div class="stat-num-sm" id="sys-uptime"><%
-        const d = Math.floor(system.uptime / 86400);
-        const h = Math.floor((system.uptime % 86400) / 3600);
-        const m = Math.floor((system.uptime % 3600) / 60);
-      %><%= d > 0 ? d + 'd ' : '' %><%= h %>h <%= m %>m</div>
-      <div class="stat-label">Uptime</div>
+      <div class="stat-num-sm" id="sys-bandwidth"><%= bw.available ? fmtBytes(bw.totalBytes) : 'N/A' %></div>
+      <div class="stat-label">BW Bulan Ini <span class="muted" id="sys-bandwidth-sub"><%= bw.available ? 'In ' + fmtBytes(bw.rxBytes) + ' · Out ' + fmtBytes(bw.txBytes) : (bw.error || 'vnStat unavailable') %></span></div>
     </div>
   </div>
 </div>
 
 <script>
 (function () {
-  function fmtUptime(s) {
-    const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
-    return (d > 0 ? d + 'd ' : '') + h + 'h ' + m + 'm';
+  function fmtBytes(bytes) {
+    const n = Number(bytes) || 0;
+    if (n < 1024) return n + ' B';
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+    if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + ' MB';
+    if (n < 1024 * 1024 * 1024 * 1024) return (n / 1024 / 1024 / 1024).toFixed(1) + ' GB';
+    return (n / 1024 / 1024 / 1024 / 1024).toFixed(1) + ' TB';
   }
   function fmtSpeed(bps) {
     if (bps == null || bps <= 0) return 'Idle';
@@ -124,12 +135,19 @@
     const memBar = document.getElementById('sys-mem-bar');
     if (memBar) memBar.style.width = d.memPercent + '%';
 
-    smoothUpdate(document.getElementById('sys-uptime'), fmtUptime(d.uptime));
-
     if (d.disk && d.disk.total > 0) {
       smoothUpdate(document.getElementById('sys-disk'), d.disk.percent + '%');
       const diskSub = document.getElementById('sys-disk-sub');
       if (diskSub) diskSub.textContent = (d.disk.used / (1024*1024*1024)).toFixed(1) + '/' + (d.disk.total / (1024*1024*1024)).toFixed(1) + 'GB';
+    }
+    if (d.bandwidth) {
+      smoothUpdate(document.getElementById('sys-bandwidth'), d.bandwidth.available ? fmtBytes(d.bandwidth.totalBytes) : 'N/A');
+      const bandwidthSub = document.getElementById('sys-bandwidth-sub');
+      if (bandwidthSub) {
+        bandwidthSub.textContent = d.bandwidth.available
+          ? 'In ' + fmtBytes(d.bandwidth.rxBytes) + ' · Out ' + fmtBytes(d.bandwidth.txBytes)
+          : (d.bandwidth.error || 'vnStat unavailable');
+      }
     }
     if (d.net && d.net.available) {
       smoothUpdate(document.getElementById('sys-net-up'), fmtSpeed(d.net.upload));

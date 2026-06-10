@@ -10,7 +10,7 @@ Self-hosted web app untuk live streaming video pre-recorded ke platform RTMP (Yo
 - **Streaming** — single video atau playlist (sequential / shuffle), audio overlay live mix, auto-retry exponential backoff, health check stale stream, scheduled streaming, stream history
 - **YouTube Upload** — OAuth2, resumable upload, progress real-time, cancel mid-upload (cocok untuk VPS bandwidth besar — file 30 GB selesai dalam menit)
 - **Multi-admin** — beberapa user admin, profile page dengan stats, last login tracking, brute-force protection
-- **System monitor** — CPU/RAM/Disk/Network/Uptime real-time via SSE, disk space pre-check di semua operasi upload/transcode/loop
+- **System monitor** — CPU/RAM/Disk/Network speed real-time via SSE + bandwidth bulanan via vnStat, disk space pre-check di semua operasi upload/transcode/loop
 
 ## Quick start
 
@@ -36,6 +36,8 @@ npm start                   # http://localhost:7575
 ```
 
 Requirements: Node.js 18+, FFmpeg + ffprobe di `$PATH`.
+
+Optional untuk kartu **BW Bulan Ini** di dashboard: `vnstat` + service `vnstatd` aktif. Kalau belum tersedia, dashboard tetap jalan dan menampilkan `N/A`.
 
 ## Env vars
 

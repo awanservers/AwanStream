@@ -8,6 +8,7 @@
   `,
 }) %>
 <%- include('partials/flash', { error, notice }) %>
+<% const streamTzLabel = typeof tzLabel !== 'undefined' ? tzLabel : 'WIB'; %>
 
 <% if (streams.length === 0) { %>
   <div class="card empty">
@@ -34,6 +35,11 @@
             <td><%= presets[s.platform] ? presets[s.platform].label : s.platform %></td>
             <td>
               <span class="badge badge-<%= s.status %>"><%= s.status %></span>
+              <% if (s.next_start_at) { %>
+                <div class="small muted">
+                  Scheduled <%= formatTimeShort(s.next_start_at) %><% if (s.next_stop_at) { %> - <%= formatTimeShort(s.next_stop_at) %><% } %>
+                </div>
+              <% } %>
               <% if (s.status === 'running' && s.started_at) { %>
                 <span class="stream-timer small" data-started-at="<%= s.started_at %>"></span>
               <% } %>
@@ -54,13 +60,19 @@
                 </form>
               <% } %>
               <button type="button" class="btn-icon"
+                      data-open-modal="schedule-stream-pl"
+                      data-stream-id="<%= s.id %>"
+                      data-stream-name="<%= s.name %>"
+                      title="Schedule">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+              </button>
+              <button type="button" class="btn-icon"
                       data-open-modal="edit-stream-pl"
                       data-stream-id="<%= s.id %>"
                       data-stream-name="<%= s.name %>"
                       data-stream-playlist-id="<%= s.playlist_id %>"
                       data-stream-platform="<%= s.platform %>"
                       data-stream-rtmp-url="<%= s.rtmp_url %>"
-                      data-stream-key="<%= s.stream_key %>"
                       data-stream-loop="<%= s.loop_video %>"
                       data-stream-re-encode="<%= s.re_encode %>"
                       data-stream-audio-id="<%= s.audio_id || '' %>"
@@ -170,6 +182,42 @@
   </div>
 </dialog>
 
+<dialog id="schedule-stream-pl" class="modal">
+  <div class="modal-card">
+    <header class="modal-header">
+      <h2>Schedule stream</h2>
+      <button type="button" class="modal-close" data-close-modal aria-label="Close">Ã—</button>
+    </header>
+    <form method="POST" id="schedule-stream-pl-form">
+      <div class="modal-body">
+        <div class="grid-2">
+          <label class="full">Stream <input id="schedule-pl-stream-name" readonly></label>
+          <label>Start at <input type="datetime-local" name="start_at" id="schedule-pl-start-at" required></label>
+          <label>Stop at <input type="datetime-local" name="stop_at" id="schedule-pl-stop-at"></label>
+          <div class="full small muted">Timezone: <%= streamTzLabel %></div>
+        </div>
+      </div>
+      <footer class="modal-footer">
+        <button type="button" class="btn" data-close-modal>Batal</button>
+        <button type="submit" class="btn btn-primary">Schedule</button>
+      </footer>
+    </form>
+  </div>
+</dialog>
+<script>
+(function() {
+  document.addEventListener('modal:before-open', (e) => {
+    if (e.detail.id !== 'schedule-stream-pl') return;
+    const btn = e.detail.trigger;
+    if (!btn) return;
+    document.getElementById('schedule-stream-pl-form').action = '/streams/' + btn.dataset.streamId + '/schedule';
+    document.getElementById('schedule-pl-stream-name').value = btn.dataset.streamName || '';
+    document.getElementById('schedule-pl-start-at').value = '';
+    document.getElementById('schedule-pl-stop-at').value = '';
+  });
+})();
+</script>
+
 <!-- Edit playlist stream modal -->
 <% if (playlists.length > 0) { %>
 <dialog id="edit-stream-pl" class="modal">
@@ -200,7 +248,7 @@
           <label>RTMP URL <input name="rtmp_url" id="edit-pl-stream-rtmp" required></label>
           <label class="full">Stream key
             <div class="input-with-toggle">
-              <input type="password" name="stream_key" id="edit-pl-stream-key" required autocomplete="off">
+              <input type="password" name="stream_key" id="edit-pl-stream-key" autocomplete="off" placeholder="Kosongkan kalau tidak diganti">
               <button type="button" class="input-toggle" data-toggle-input="edit-pl-stream-key" aria-label="Show/hide stream key">
                 <svg class="eye-show" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                 <svg class="eye-hide" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
@@ -250,7 +298,16 @@
     document.getElementById('edit-pl-stream-playlist').value = btn.dataset.streamPlaylistId || '';
     document.getElementById('edit-pl-stream-platform').value = btn.dataset.streamPlatform || 'custom';
     document.getElementById('edit-pl-stream-rtmp').value = btn.dataset.streamRtmpUrl || '';
-    document.getElementById('edit-pl-stream-key').value = btn.dataset.streamKey || '';
+    const keyInput = document.getElementById('edit-pl-stream-key');
+    keyInput.value = '';
+    keyInput.type = 'password';
+    const keyToggle = document.querySelector('[data-toggle-input="edit-pl-stream-key"]');
+    if (keyToggle) {
+      const showIcon = keyToggle.querySelector('.eye-show');
+      const hideIcon = keyToggle.querySelector('.eye-hide');
+      if (showIcon) showIcon.style.display = '';
+      if (hideIcon) hideIcon.style.display = 'none';
+    }
     document.getElementById('edit-pl-stream-loop').checked = btn.dataset.streamLoop === '1';
     document.getElementById('edit-pl-re-encode').value = btn.dataset.streamReEncode || '0';
     document.getElementById('edit-pl-stream-audio-id').value = btn.dataset.streamAudioId || '';

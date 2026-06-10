@@ -1,33 +1,8 @@
 const express = require('express');
 const { db } = require('../db');
+const { parseLocalToUTC } = require('../timezone');
 
 const router = express.Router();
-
-// Parse a "YYYY-MM-DDTHH:MM" value from <input type="datetime-local"> into a
-// UTC ISO string, interpreting the local time in the given IANA timezone.
-function parseLocalToUTC(localStr, tz) {
-  if (!localStr) return null;
-  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(localStr);
-  if (!m) return null;
-  const [, Y, Mo, D, H, Mi, S] = m.map((v, i) => (i === 0 ? v : Number(v)));
-  // Strategy: build a UTC Date from the pieces, compute the offset that the
-  // target timezone was at that moment, and subtract it. One iteration is
-  // enough across DST boundaries because we snap to the target zone's offset.
-  const guessUTC = Date.UTC(Y, Mo - 1, D, H, Mi, S || 0);
-  const tzDate = new Date(guessUTC);
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz, hourCycle: 'h23',
-    year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
-  }).formatToParts(tzDate).reduce((acc, p) => {
-    if (p.type !== 'literal') acc[p.type] = Number(p.value);
-    return acc;
-  }, {});
-  const asIfUTC = Date.UTC(parts.year, parts.month - 1, parts.day,
-    parts.hour, parts.minute, parts.second);
-  const offset = asIfUTC - guessUTC; // tz offset in ms
-  return new Date(guessUTC - offset).toISOString();
-}
 
 router.get('/', (req, res) => {
   const schedules = db.prepare(`

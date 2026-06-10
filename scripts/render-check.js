@@ -35,7 +35,18 @@ const pages = [
       recentStreams: [{ id: 1, name: 'demo', video_title: 'v1', platform: 'youtube',
         status: 'idle', started_at: null, stopped_at: null }],
       nextSchedule: { start_at: '2026-05-12T10:00:00.000Z', stream_name: 'demo' },
-      system: { cpuPercent: 23, cpuCount: 4, loadAvg: [0.92, 0.85, 0.78], totalMem: 8*1024*1024*1024, usedMem: 3.2*1024*1024*1024, memPercent: 40, uptime: 86400*2 + 3600*5 + 60*30, disk: { total: 50*1024*1024*1024, used: 20*1024*1024*1024, free: 30*1024*1024*1024, percent: 40 } },
+      system: {
+        cpuPercent: 23, cpuCount: 4, loadAvg: [0.92, 0.85, 0.78],
+        totalMem: 8*1024*1024*1024, usedMem: 3.2*1024*1024*1024,
+        memPercent: 40, uptime: 86400*2 + 3600*5 + 60*30,
+        disk: { total: 50*1024*1024*1024, used: 20*1024*1024*1024, free: 30*1024*1024*1024, percent: 40 },
+        bandwidth: {
+          available: true,
+          rxBytes: 42 * 1024 * 1024 * 1024,
+          txBytes: 128 * 1024 * 1024 * 1024,
+          totalBytes: 170 * 1024 * 1024 * 1024,
+        },
+      },
     },
   },
   {

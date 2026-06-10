@@ -11,6 +11,7 @@ require('../src/looper');
 require('../src/audioManager');
 require('../src/youtubeManager');
 require('../src/youtubeUploader');
+require('../src/bandwidthManager');
 require('../src/auth');
 require('../src/routes/auth');
 require('../src/routes/videos');

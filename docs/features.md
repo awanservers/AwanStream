@@ -710,15 +710,17 @@ pending → started → done | error
 
 ## Dashboard & System Monitor
 
-**Apa:** Overview app + real-time CPU/RAM/Uptime di dashboard.
+**Apa:** Overview app + real-time CPU/RAM/Disk/Network speed di dashboard, plus bandwidth bulanan dari vnStat.
 
 **Stat cards:** Videos, Streams, Schedules, Storage — dengan ikon warna-warni + link ke halaman masing-masing.
 
 **System monitor:**
 - CPU% (hitung dari `os.loadavg()[0] / cpuCount * 100`)
 - Memory% (dari `os.totalmem()/freemem()`)
-- Uptime (dari `os.uptime()`)
-- Polling setiap 3 detik ke `GET /api/system`
+- Disk usage (dari `fs.statfsSync()` pada `public/uploads`)
+- Network speed live (delta `/proc/net/dev` via SSE / polling)
+- BW Bulan Ini (dari `vnstat --json`; fallback `N/A` kalau vnStat belum tersedia)
+- SSE `GET /api/events`, fallback polling ke `GET /api/system`
 
 **Recent streams:** 5 stream terakhir (status + waktu)
 
