@@ -17,6 +17,37 @@ const PRESETS = {
   custom:   { label: 'Custom',   url: '' },
 };
 
+function parseScheduleInput(body) {
+  if (body.schedule_enabled !== '1') {
+    return { enabled: false };
+  }
+
+  const { start_at, stop_at } = body;
+  if (!start_at) {
+    return { enabled: true, error: 'Start+time+is+required+when+scheduling' };
+  }
+
+  const tz = process.env.TZ || 'Asia/Jakarta';
+  const startIso = parseLocalToUTC(start_at, tz);
+  if (!startIso) {
+    return { enabled: true, error: 'Invalid+start+time' };
+  }
+
+  const stopIso = stop_at ? parseLocalToUTC(stop_at, tz) : null;
+  if (stopIso && stopIso <= startIso) {
+    return { enabled: true, error: 'Stop+time+must+be+after+start+time' };
+  }
+
+  return { enabled: true, startIso, stopIso };
+}
+
+function insertSchedule(streamId, schedule) {
+  if (!schedule || !schedule.enabled) return false;
+  db.prepare(`INSERT INTO schedules (stream_id, start_at, stop_at, status)
+    VALUES (?, ?, ?, 'pending')`).run(streamId, schedule.startIso, schedule.stopIso);
+  return true;
+}
+
 router.get('/', (req, res) => {
   res.redirect('/streams/single');
 });
@@ -36,7 +67,7 @@ router.get('/single', (req, res) => {
     WHERE s.playlist_id IS NULL
     ORDER BY s.created_at DESC
   `).all();
-  const videos = db.prepare("SELECT id, title FROM videos WHERE status='ready' ORDER BY title").all();
+  const videos = db.prepare("SELECT id, title, thumbnail FROM videos WHERE status='ready' ORDER BY title").all();
   const audioFiles = audioManager.listReady();
   res.render('streams-single', {
     streams, videos, audioFiles, presets: PRESETS,
@@ -97,7 +128,12 @@ router.post('/', (req, res) => {
   const audioId = Number(audio_id) || null;
   const vol = parseFloat(audio_volume);
   const safeVol = (Number.isFinite(vol) && vol >= 0 && vol <= 2) ? String(vol) : '0.3';
-  db.prepare(`INSERT INTO streams
+  const schedule = parseScheduleInput(req.body);
+  const back = plid ? '/streams/playlist' : '/streams/single';
+  if (schedule.error) {
+    return res.redirect(back + '?error=' + schedule.error);
+  }
+  const insert = db.prepare(`INSERT INTO streams
     (name, video_id, playlist_id, platform, rtmp_url, stream_key, loop_video,
      re_encode, video_bitrate, keyframe_interval, preset, audio_id, audio_volume)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
@@ -115,8 +151,9 @@ router.post('/', (req, res) => {
     audioId,
     safeVol,
   );
-  const back = plid ? '/streams/playlist' : '/streams/single';
-  res.redirect(back + '?notice=Stream+created');
+  const scheduleCreated = insertSchedule(Number(insert.lastInsertRowid), schedule);
+  const notice = scheduleCreated ? 'Stream+created+and+scheduled' : 'Stream+created';
+  res.redirect(back + '?notice=' + notice);
 });
 
 router.post('/:id/start', (req, res) => {

@@ -7,6 +7,21 @@ Versi belum di-tag — pakai tanggal sebagai penanda release.
 
 ## [Unreleased]
 
+### Changed — Loop tool UX
+- **Form Loop dirapikan jadi builder dua kolom** — pilihan video, durasi, title, mode, audio overlay, dan preview sumber sekarang lebih mudah discan.
+- **Loop form sekarang menampilkan thumbnail video sumber** dan estimasi loop secara ringkas.
+- **Validasi Loop form pindah ke inline error** — tidak lagi memakai popup `alert()`.
+
+### Changed — Dashboard bandwidth label
+- **Kartu Bandwidth di Dashboard disederhanakan** — subteks sekarang hanya "Total bulan ini", tanpa detail In/Out.
+- **Kartu Memory di Dashboard sekarang menampilkan used / total** — unit adaptif dari MB ke GB.
+
+### Changed — Stream creation modal
+- **Schedule dipindah ke modal New Stream** — create stream sekarang punya tab Stream / Schedule / Audio, dan bisa langsung membuat jadwal saat stream dibuat.
+- **Tombol kalender per-row di halaman Streams dihapus** supaya alur utama tidak bercabang dan lebih mudah dipahami.
+- **Modal New Single Stream sekarang menampilkan preview thumbnail video** — video picker dipindah ke bawah field Name, area kanan dipakai untuk visual video yang akan live.
+- **Modal create/edit stream diperlebar** supaya form dan preview video terasa lebih lega.
+
 ### Fixed — Stream key secret handling
 - **Edit stream modal tidak lagi render stream key lama ke HTML** — `data-stream-key` di tombol Edit dihapus dari Single Stream dan Playlist Stream.
 - **Edit stream key sekarang opsional** — field key dikosongkan saat modal dibuka; kalau dibiarkan kosong, backend mempertahankan key lama. Isi field hanya kalau ingin mengganti key.

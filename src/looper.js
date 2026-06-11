@@ -98,6 +98,7 @@ function getProgress(jobId) {
  * @param {object}  [options]
  * @param {boolean} [options.smooth=true]        Enable crossfade seamless loop.
  * @param {number}  [options.crossfadeSeconds=1] Crossfade duration (smooth only).
+ * @param {boolean} [options.loopSafe=false]     Round smooth output to a full seamless-unit boundary.
  * @param {number}  [options.audioId]            Optional audio track id to overlay.
  * @param {number}  [options.audioVolume=0.3]    Volume of overlay audio (mix mode).
  * @param {string}  [options.audioMode='mix']    'mix' (preserve video audio) or 'replace'.
@@ -110,11 +111,11 @@ function start(sourceVideoId, targetSeconds, title, options = {}) {
   const srcPath = path.join(uploadDir, src.filename);
   if (!fs.existsSync(srcPath)) throw new Error('Source file missing on disk');
 
-  const target = Number(targetSeconds);
-  if (!Number.isFinite(target) || target <= 0) {
+  const requestedTarget = Number(targetSeconds);
+  if (!Number.isFinite(requestedTarget) || requestedTarget <= 0) {
     throw new Error('Target duration must be a positive number of seconds');
   }
-  if (target > 24 * 3600) {
+  if (requestedTarget > 24 * 3600) {
     throw new Error('Target duration cannot exceed 24 hours');
   }
 
@@ -129,11 +130,12 @@ function start(sourceVideoId, targetSeconds, title, options = {}) {
   if (!srcDuration) {
     throw new Error('Cannot detect source duration. Probe failed.');
   }
-  if (target < srcDuration) {
-    throw new Error(`Target (${target}s) is shorter than source (${Math.round(srcDuration)}s). Pick a longer target.`);
+  if (requestedTarget < srcDuration) {
+    throw new Error(`Target (${requestedTarget}s) is shorter than source (${Math.round(srcDuration)}s). Pick a longer target.`);
   }
 
   const smooth = options.smooth !== false;
+  const loopSafe = smooth && options.loopSafe === true;
   let crossfadeSec = Number(options.crossfadeSeconds);
   if (!Number.isFinite(crossfadeSec) || crossfadeSec <= 0) crossfadeSec = 1.0;
 
@@ -166,6 +168,13 @@ function start(sourceVideoId, targetSeconds, title, options = {}) {
     }
   }
 
+  let target = requestedTarget;
+  let seamlessLen = null;
+  if (loopSafe) {
+    seamlessLen = srcDuration - crossfadeSec;
+    target = roundUpToLoopSafeTarget(requestedTarget, seamlessLen);
+  }
+
   // Insert output row up-front.
   const base = src.filename.replace(/\.[^.]+$/, '');
   const outFilename = `${Date.now()}_${base}_loop.mp4`;
@@ -194,7 +203,7 @@ function start(sourceVideoId, targetSeconds, title, options = {}) {
   const outputVideoId = Number(result.lastInsertRowid);
   const logPath = path.join(logsDir, `loop-${jobId}.log`);
   const logStream = fs.createWriteStream(logPath, { flags: 'a' });
-  logStream.write(`\n=== ${new Date().toISOString()} starting loop job=${jobId} mode=${smooth ? 'smooth' : 'fast'} src=${src.id} L=${srcDuration.toFixed(2)}s target=${target}s crossfade=${crossfadeSec}s audio=${audioPath ? `${options.audioId} (${audioMode}, vol=${audioVolume})` : 'none'}\n`);
+  logStream.write(`\n=== ${new Date().toISOString()} starting loop job=${jobId} mode=${smooth ? 'smooth' : 'fast'} src=${src.id} L=${srcDuration.toFixed(2)}s requestedTarget=${requestedTarget}s target=${target}s crossfade=${crossfadeSec}s loopSafe=${loopSafe ? `yes seamlessLen=${seamlessLen.toFixed(3)}s` : 'no'} audio=${audioPath ? `${options.audioId} (${audioMode}, vol=${audioVolume})` : 'none'}\n`);
 
   const jobState = {
     mode: smooth ? 'smooth' : 'fast',
@@ -237,7 +246,15 @@ function start(sourceVideoId, targetSeconds, title, options = {}) {
     runFastPhase(ctx);
   }
 
-  return { jobId, outputVideoId, outputFilename: outFilename, mode: jobState.mode };
+  return {
+    jobId,
+    outputVideoId,
+    outputFilename: outFilename,
+    mode: jobState.mode,
+    requestedTarget,
+    target,
+    loopSafe,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -649,6 +666,14 @@ function formatTargetLabel(seconds) {
   return seconds + 's';
 }
 
+function roundUpToLoopSafeTarget(targetSeconds, seamlessLen) {
+  const target = Number(targetSeconds);
+  const unit = Number(seamlessLen);
+  if (!Number.isFinite(target) || !Number.isFinite(unit) || unit <= 0) return target;
+  const repeats = Math.max(1, Math.ceil(target / unit));
+  return Number((repeats * unit).toFixed(3));
+}
+
 // One-shot probe: does the file have an audio track? Uses transcoder.probeVideoInfo.
 function probeHasAudio(filePath) {
   try {
@@ -668,4 +693,5 @@ module.exports = {
   getJob,
   reconcileOnBoot,
   tailLog,
+  roundUpToLoopSafeTarget,
 };

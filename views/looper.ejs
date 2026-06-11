@@ -12,117 +12,134 @@
     <p class="muted small">Upload clip dulu di <a href="/videos">Library</a>. Setelah upload, durasi otomatis di-probe dan video akan muncul di sini.</p>
   </div>
 <% } else { %>
-  <div class="card">
+  <div class="loop-builder">
     <form method="POST" action="/looper/start" id="loop-form">
-      <div class="grid-2">
-        <label class="full">Video sumber
-          <select name="source_video_id" id="source_video_id" required>
-            <option value="">— Pilih video —</option>
-            <% videos.forEach(v => {
-                 const dur = Math.round(v.duration_seconds || 0);
-                 const durLabel = dur >= 60 ? Math.floor(dur/60) + 'm ' + (dur%60) + 's' : dur + 's';
-                 const sizeLabel = v.size_bytes ? (v.size_bytes / (1024*1024)).toFixed(1) + ' MB' : '';
-                 const resLabel = v.src_width && v.src_height ? v.src_width + '×' + v.src_height : '';
-                 const meta = [durLabel, resLabel, sizeLabel].filter(Boolean).join(' · ');
-            %>
-              <option value="<%= v.id %>" data-duration="<%= v.duration_seconds %>">
-                <%= v.title %> — <%= meta %>
-              </option>
-            <% }) %>
-          </select>
-          <span class="small muted">Hanya video dengan durasi terdeteksi yang tampil.</span>
-        </label>
+      <div class="loop-builder-grid">
+        <div class="loop-main">
+          <div class="loop-field">
+            <label for="source_video_id">Video sumber</label>
+            <select name="source_video_id" id="source_video_id" required>
+              <option value="">Pilih video...</option>
+              <% videos.forEach(v => {
+                   const dur = Math.round(v.duration_seconds || 0);
+                   const durLabel = dur >= 60 ? Math.floor(dur/60) + 'm ' + (dur%60) + 's' : dur + 's';
+                   const sizeLabel = v.size_bytes ? (v.size_bytes / (1024*1024)).toFixed(1) + ' MB' : '';
+                   const resLabel = v.src_width && v.src_height ? v.src_width + 'x' + v.src_height : '';
+                   const meta = [durLabel, resLabel, sizeLabel].filter(Boolean).join(' - ');
+              %>
+                <option value="<%= v.id %>"
+                        data-duration="<%= v.duration_seconds %>"
+                        data-thumb="<%= v.thumbnail ? '/videos/' + v.id + '/thumb' : '' %>"
+                        data-title="<%= v.title %>"
+                        data-meta="<%= meta %>">
+                  <%= v.title %> - <%= meta %>
+                </option>
+              <% }) %>
+            </select>
+          </div>
 
-        <label class="full">Target durasi
-          <div class="preset-grid">
-            <% presets.forEach((p, idx) => { %>
+          <div class="loop-field">
+            <div class="loop-field-head">
+              <label>Target durasi</label>
+              <span class="small muted">30 menit - 24 jam</span>
+            </div>
+            <div class="preset-grid">
+              <% presets.forEach((p, idx) => { %>
+                <label class="preset-chip">
+                  <input type="radio" name="target_preset" value="<%= p.key %>"
+                         <%= idx === 2 ? 'checked' : '' %>>
+                  <span><%= p.label %></span>
+                </label>
+              <% }) %>
               <label class="preset-chip">
-                <input type="radio" name="target_preset" value="<%= p.key %>"
-                       <%= idx === 2 ? 'checked' : '' %>>
-                <span><%= p.label %></span>
-              </label>
-            <% }) %>
-            <label class="preset-chip">
-              <input type="radio" name="target_preset" value="custom">
-              <span>Custom</span>
-            </label>
-          </div>
-          <div id="custom-duration-row" style="display:none; margin-top:10px; display:flex; align-items:center; gap:8px;">
-            <input type="number" name="custom_minutes" id="custom_minutes"
-                   min="1" max="1440" step="1" placeholder="Menit"
-                   style="max-width:160px;">
-            <span class="small muted">menit (1 - 1440)</span>
-          </div>
-        </label>
-
-        <label class="full">Title output <span class="muted small">(opsional)</span>
-          <input type="text" name="title" id="title"
-                 placeholder="Kosongkan untuk auto-generate: '<Source> (smooth/loop Nh)'">
-        </label>
-
-        <label class="full" style="display:flex; align-items:flex-start; gap:10px; padding:12px; background:var(--panel); border:1px solid var(--border); border-radius:8px;">
-          <input type="checkbox" name="smooth" id="smooth" checked style="margin-top:3px;">
-          <span style="flex:1;">
-            <strong>Smooth mode (seamless crossfade)</strong>
-            <div class="small muted" style="margin-top:3px;">
-              Crossfade di loop boundary supaya transisi halus tanpa "lompatan". Phase 1 re-encode clip pendek → phase 2 loop dengan -c copy.
-              <br><em>Matikan kalau source sudah start≈end secara natural.</em>
-            </div>
-            <div id="crossfade-control" style="margin-top:12px; padding-top:10px; border-top:1px solid var(--border);">
-              <label style="display:block;">
-                <strong style="font-size:0.9rem;">Crossfade duration: <span id="crossfade-value">1.5</span>s</strong>
-                <input type="range" name="crossfade_seconds" id="crossfade_seconds"
-                       min="0.5" max="3.0" step="0.1" value="1.5"
-                       style="width:100%; margin-top:6px;">
-                <div class="small muted" style="display:flex; justify-content:space-between; margin-top:2px;">
-                  <span>0.5s (sharp)</span>
-                  <span>1.5s (default)</span>
-                  <span>3.0s (smooth)</span>
-                </div>
-                <div class="small muted" style="margin-top:4px;">
-                  Tip: clip Veo 8 detik → coba <strong>1.5s</strong>. Kalau masih kelihatan loop seam, naikin ke <strong>2.0s</strong>. Source clip lebih panjang (16+s) bisa coba <strong>2.5-3.0s</strong>.
-                </div>
+                <input type="radio" name="target_preset" value="custom">
+                <span>Custom</span>
               </label>
             </div>
-          </span>
-        </label>
-
-        <div class="full" style="padding:12px; background:var(--panel); border:1px solid var(--border); border-radius:8px;">
-          <strong>Audio overlay <span class="muted small">(opsional — tambah musik background)</span></strong>
-          <div class="small muted" style="margin:3px 0 10px;">
-            Cocok untuk video pendek (misal fireplace 8 detik) yang mau jadi video panjang dengan musik jazz. Audio akan di-loop otomatis sampai match target durasi.
+            <div class="loop-inline-row" id="custom-duration-row" style="display:none;">
+              <input type="number" name="custom_minutes" id="custom_minutes"
+                     min="1" max="1440" step="1" placeholder="Menit">
+              <span class="small muted">menit</span>
+            </div>
           </div>
-          <div class="grid-2" style="gap:10px;">
-            <label class="full">Audio track
-              <select name="audio_id" id="audio_id">
-                <option value="">— Tanpa audio overlay —</option>
-                <% if (typeof audioTracks !== 'undefined' && audioTracks.length > 0) { %>
-                  <% audioTracks.forEach(a => { %>
-                    <option value="<%= a.id %>"><%= a.title %><% if (a.duration_seconds) { %> — <%= Math.floor(a.duration_seconds/60) %>m <%= Math.round(a.duration_seconds%60) %>s<% } %></option>
-                  <% }) %>
-                <% } else { %>
-                  <option value="" disabled>Belum ada audio. Upload di /audio dulu.</option>
-                <% } %>
-              </select>
-            </label>
-            <label>Mode
-              <select name="audio_mode" id="audio_mode">
-                <option value="mix" selected>Mix (gabung dengan suara video)</option>
-                <option value="replace">Replace (ganti total suara video)</option>
-              </select>
-            </label>
-            <label>Volume overlay <span class="muted small">(0.0 - 1.0)</span>
-              <input type="number" name="audio_volume" value="0.3" min="0" max="1" step="0.1" style="max-width:100px;">
-            </label>
+
+          <div class="loop-field">
+            <label for="title">Title output <span class="muted small">(opsional)</span></label>
+            <input type="text" name="title" id="title"
+                   placeholder="Kosongkan untuk auto-generate">
           </div>
         </div>
 
-        <div class="full" id="estimate-row" style="display:none;">
-          <div class="alert alert-info" id="estimate-box"></div>
+        <aside class="loop-side">
+          <div class="loop-source-preview">
+            <img id="loop-source-thumb" alt="" loading="lazy" style="display:none;">
+            <div class="loop-source-empty" id="loop-source-empty">Preview video</div>
+          </div>
+          <div class="loop-source-info">
+            <strong id="loop-source-title"></strong>
+            <span class="small muted" id="loop-source-meta"></span>
+          </div>
+          <div id="estimate-row" style="display:none;">
+            <div class="alert alert-info" id="estimate-box"></div>
+          </div>
+        </aside>
+
+        <div class="loop-options-grid">
+          <div class="loop-option-panel">
+            <label class="loop-toggle">
+              <input type="checkbox" name="smooth" id="smooth" checked>
+              <span>
+                <strong>Smooth mode</strong>
+                <span class="small muted">Crossfade di boundary loop supaya transisi lebih halus.</span>
+              </span>
+            </label>
+            <div class="loop-range" id="crossfade-control">
+              <div class="loop-range-head">
+                <span class="small muted">Crossfade</span>
+                <strong><span id="crossfade-value">1.5</span>s</strong>
+              </div>
+              <input type="range" name="crossfade_seconds" id="crossfade_seconds"
+                     min="0.5" max="3.0" step="0.1" value="1.5">
+              <div class="loop-range-scale small muted">
+                <span>0.5s</span>
+                <span>1.5s</span>
+                <span>3.0s</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="loop-option-panel">
+            <div class="loop-panel-title">Audio overlay <span class="muted small">(opsional)</span></div>
+            <div class="loop-audio-grid">
+              <label>Audio track
+                <select name="audio_id" id="audio_id">
+                  <option value="">Tanpa audio overlay</option>
+                  <% if (typeof audioTracks !== 'undefined' && audioTracks.length > 0) { %>
+                    <% audioTracks.forEach(a => { %>
+                      <option value="<%= a.id %>"><%= a.title %><% if (a.duration_seconds) { %> - <%= Math.floor(a.duration_seconds/60) %>m <%= Math.round(a.duration_seconds%60) %>s<% } %></option>
+                    <% }) %>
+                  <% } else { %>
+                    <option value="" disabled>Belum ada audio. Upload di /audio dulu.</option>
+                  <% } %>
+                </select>
+              </label>
+              <label>Mode
+                <select name="audio_mode" id="audio_mode">
+                  <option value="mix" selected>Mix</option>
+                  <option value="replace">Replace</option>
+                </select>
+              </label>
+              <label>Volume
+                <input type="number" name="audio_volume" value="0.3" min="0" max="1" step="0.1">
+              </label>
+            </div>
+          </div>
         </div>
+
+        <div class="alert alert-error" id="loop-form-error" style="display:none;"></div>
       </div>
 
-      <footer class="modal-footer" style="margin-top:16px;">
+      <footer class="loop-builder-footer">
         <a href="/videos" class="btn">Cancel</a>
         <button type="submit" class="btn btn-primary">Start loop</button>
       </footer>
@@ -278,6 +295,11 @@ document.querySelectorAll('#loop-log-modal [data-close-modal]').forEach(btn => {
   const sourceSelect = document.getElementById('source_video_id');
   const estimateRow = document.getElementById('estimate-row');
   const estimateBox = document.getElementById('estimate-box');
+  const sourceThumb = document.getElementById('loop-source-thumb');
+  const sourceEmpty = document.getElementById('loop-source-empty');
+  const sourceTitle = document.getElementById('loop-source-title');
+  const sourceMeta = document.getElementById('loop-source-meta');
+  const formError = document.getElementById('loop-form-error');
 
   function selectedTargetSeconds() {
     const checked = document.querySelector('input[name="target_preset"]:checked');
@@ -311,18 +333,59 @@ document.querySelectorAll('#loop-log-modal [data-close-modal]').forEach(btn => {
     const srcLabel = srcDur >= 60
       ? Math.floor(srcDur / 60) + 'm ' + Math.round(srcDur % 60) + 's'
       : Math.round(srcDur) + 's';
+    const mode = document.getElementById('smooth') && document.getElementById('smooth').checked
+      ? 'Smooth mode aktif: buat seamless unit dulu, lalu loop sampai target.'
+      : 'Fast mode: langsung loop copy, cocok kalau source sudah seamless.';
     estimateBox.textContent =
-      'Clip sumber ' + srcLabel + ' akan di-loop ~' + loops + ' kali untuk menghasilkan ' +
-      outputH + ' jam. Proses cepat karena tidak re-encode (hanya repeat container).';
+      'Source ' + srcLabel + ' akan di-loop sekitar ' + loops + 'x untuk output ' +
+      outputH + ' jam. ' + mode;
     estimateRow.style.display = 'block';
   }
 
+  function updateSourcePreview() {
+    if (!sourceSelect) return;
+    const opt = sourceSelect.selectedOptions[0];
+    const hasVideo = opt && opt.value;
+    const thumb = hasVideo ? opt.dataset.thumb : '';
+    if (sourceTitle) sourceTitle.textContent = hasVideo ? (opt.dataset.title || opt.textContent.trim()) : '';
+    if (sourceMeta) sourceMeta.textContent = hasVideo ? (opt.dataset.meta || '') : '';
+    if (sourceThumb && sourceEmpty) {
+      if (thumb) {
+        sourceThumb.src = thumb;
+        sourceThumb.style.display = 'block';
+        sourceEmpty.style.display = 'none';
+      } else {
+        sourceThumb.removeAttribute('src');
+        sourceThumb.style.display = 'none';
+        sourceEmpty.style.display = 'flex';
+      }
+    }
+    clearLoopError();
+    updateEstimate();
+  }
+
+  function showLoopError(message) {
+    if (!formError) return;
+    formError.textContent = message;
+    formError.style.display = 'block';
+  }
+
+  function clearLoopError() {
+    if (!formError) return;
+    formError.textContent = '';
+    formError.style.display = 'none';
+  }
+
   presetRadios.forEach(r => r.addEventListener('change', () => {
+    clearLoopError();
     updateCustomVisibility();
     updateEstimate();
   }));
-  if (customInput) customInput.addEventListener('input', updateEstimate);
-  if (sourceSelect) sourceSelect.addEventListener('change', updateEstimate);
+  if (customInput) customInput.addEventListener('input', () => {
+    clearLoopError();
+    updateEstimate();
+  });
+  if (sourceSelect) sourceSelect.addEventListener('change', updateSourcePreview);
 
   // Crossfade slider — live update label and toggle visibility with smooth mode.
   const crossfadeSlider = document.getElementById('crossfade_seconds');
@@ -339,6 +402,7 @@ document.querySelectorAll('#loop-log-modal [data-close-modal]').forEach(btn => {
     const updateCrossfadeVisibility = () => {
       crossfadeControl.style.opacity = smoothCheck.checked ? '1' : '0.4';
       if (crossfadeSlider) crossfadeSlider.disabled = !smoothCheck.checked;
+      updateEstimate();
     };
     smoothCheck.addEventListener('change', updateCrossfadeVisibility);
     updateCrossfadeVisibility();
@@ -349,20 +413,22 @@ document.querySelectorAll('#loop-log-modal [data-close-modal]').forEach(btn => {
     form.addEventListener('submit', (e) => {
       if (!sourceSelect.value) {
         e.preventDefault();
-        alert('Pilih video sumber dulu.');
+        showLoopError('Pilih video sumber dulu.');
+        sourceSelect.focus();
         return;
       }
       const target = selectedTargetSeconds();
       if (!target) {
         e.preventDefault();
-        alert('Pilih target durasi.');
+        showLoopError('Pilih target durasi.');
+        if (customInput) customInput.focus();
         return;
       }
       const opt = sourceSelect.selectedOptions[0];
       const srcDur = opt ? Number(opt.dataset.duration) : null;
       if (srcDur && target < srcDur) {
         e.preventDefault();
-        alert('Target (' + target + 's) lebih pendek dari sumber (' + Math.round(srcDur) + 's). Pilih target yang lebih panjang.');
+        showLoopError('Target lebih pendek dari video sumber. Pilih durasi yang lebih panjang.');
       }
     });
   }
@@ -409,7 +475,7 @@ document.querySelectorAll('#loop-log-modal [data-close-modal]').forEach(btn => {
 
   // Init.
   updateCustomVisibility();
-  updateEstimate();
+  updateSourcePreview();
 })();
 </script>
 

@@ -13,6 +13,12 @@
     if (n < 1024 * 1024 * 1024 * 1024) return (n / 1024 / 1024 / 1024).toFixed(1) + ' GB';
     return (n / 1024 / 1024 / 1024 / 1024).toFixed(1) + ' TB';
   }
+  function fmtMemory(bytes) {
+    const n = Number(bytes) || 0;
+    const mb = n / 1024 / 1024;
+    if (mb < 1024) return Math.round(mb) + ' MB';
+    return (mb / 1024).toFixed(1) + ' GB';
+  }
   const bw = system.bandwidth || { available: false, error: 'vnStat unavailable', totalBytes: 0, rxBytes: 0, txBytes: 0 };
 %>
 
@@ -48,7 +54,7 @@
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 20h20"/><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
     </div>
     <div class="stat-body">
-      <div class="stat-num" id="sys-mem"><%= (system.usedMem / (1024*1024*1024)).toFixed(1) %> GB<span class="stat-num-sub" id="sys-mem-total"> / <%= (system.totalMem / (1024*1024*1024)).toFixed(1) %> GB</span></div>
+      <div class="stat-num stat-num-memory" id="sys-mem"><%= fmtMemory(system.usedMem) %> / <%= fmtMemory(system.totalMem) %></div>
       <div class="stat-label">Memory</div>
       <div class="stat-bar"><div class="stat-bar-fill stat-bar-green" id="sys-mem-bar" style="width:<%= system.memPercent %>%"></div></div>
     </div>
@@ -98,7 +104,7 @@
   <div class="stat-card stat-card-sm">
     <div class="stat-body">
       <div class="stat-num-sm" id="sys-bandwidth"><%= bw.available ? fmtBytes(bw.totalBytes) : 'N/A' %></div>
-      <div class="stat-label">BW Bulan Ini <span class="muted" id="sys-bandwidth-sub"><%= bw.available ? 'In ' + fmtBytes(bw.rxBytes) + ' · Out ' + fmtBytes(bw.txBytes) : (bw.error || 'vnStat unavailable') %></span></div>
+      <div class="stat-label">Bandwidth <span class="muted" id="sys-bandwidth-sub"><%= bw.available ? 'Total bulan ini' : (bw.error || 'vnStat unavailable') %></span></div>
     </div>
   </div>
 </div>
@@ -120,6 +126,12 @@
     if (mbps < 1) return (mbps * 1000).toFixed(0) + ' Kbps';
     return mbps.toFixed(2) + ' Mbps';
   }
+  function fmtMemory(bytes) {
+    const n = Number(bytes) || 0;
+    const mb = n / 1024 / 1024;
+    if (mb < 1024) return Math.round(mb) + ' MB';
+    return (mb / 1024).toFixed(1) + ' GB';
+  }
   function smoothUpdate(el, newText) {
     if (!el || el.textContent === newText) return;
     el.style.opacity = '0.5';
@@ -131,7 +143,7 @@
     const cpuBar = document.getElementById('sys-cpu-bar');
     if (cpuBar) cpuBar.style.width = d.cpuPercent + '%';
 
-    smoothUpdate(document.getElementById('sys-mem'), (d.usedMem / (1024*1024*1024)).toFixed(1) + ' GB');
+    smoothUpdate(document.getElementById('sys-mem'), fmtMemory(d.usedMem) + ' / ' + fmtMemory(d.totalMem));
     const memBar = document.getElementById('sys-mem-bar');
     if (memBar) memBar.style.width = d.memPercent + '%';
 
@@ -145,7 +157,7 @@
       const bandwidthSub = document.getElementById('sys-bandwidth-sub');
       if (bandwidthSub) {
         bandwidthSub.textContent = d.bandwidth.available
-          ? 'In ' + fmtBytes(d.bandwidth.rxBytes) + ' · Out ' + fmtBytes(d.bandwidth.txBytes)
+          ? 'Total bulan ini'
           : (d.bandwidth.error || 'vnStat unavailable');
       }
     }
