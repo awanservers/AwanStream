@@ -91,6 +91,7 @@ function startStream(stream, videoPath, audioPath) {
     // Mix video audio (input 0) with overlay audio (input 1).
     // Volume of overlay is configurable (default 0.3 = 30%).
     const vol = stream.audio_volume || '0.3';
+    const mode = stream.audio_mode || 'mix';
 
     // Determine if video has audio. Prefer cached `videos.has_audio` column;
     // fall back to a one-time probe (cached back to DB) for older rows.
@@ -113,7 +114,7 @@ function startStream(stream, videoPath, audioPath) {
       }
     }
 
-    if (videoHasAudio) {
+    if (videoHasAudio && mode === 'mix') {
       // Both video and overlay have audio → mix them.
       args.push(
         '-filter_complex',
@@ -122,7 +123,7 @@ function startStream(stream, videoPath, audioPath) {
         '-map', '[aout]',
       );
     } else {
-      // Video has no audio → use overlay audio directly at configured volume.
+      // Video has no audio or mode is 'replace' → use overlay audio directly at configured volume.
       args.push(
         '-filter_complex',
         `[1:a]volume=${vol}[aout]`,

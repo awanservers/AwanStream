@@ -108,7 +108,7 @@ router.get('/playlist', (req, res) => {
 
 router.post('/', (req, res) => {
   const { name, video_id, playlist_id, platform, rtmp_url, stream_key, loop_video,
-          re_encode, video_bitrate, keyframe_interval, preset, audio_id, audio_volume } = req.body;
+          re_encode, video_bitrate, keyframe_interval, preset, audio_id, audio_volume, audio_mode } = req.body;
   if (!name || !rtmp_url || !stream_key) {
     const back = playlist_id ? '/streams/playlist' : '/streams/single';
     return res.redirect(back + '?error=All+fields+are+required');
@@ -127,7 +127,8 @@ router.post('/', (req, res) => {
   }
   const audioId = Number(audio_id) || null;
   const vol = parseFloat(audio_volume);
-  const safeVol = (Number.isFinite(vol) && vol >= 0 && vol <= 2) ? String(vol) : '0.3';
+  const safeVol = (Number.isFinite(vol) && vol >= 0 && vol <= 10) ? String(vol) : '0.3';
+  const safeMode = (audio_mode === 'replace') ? 'replace' : 'mix';
   const schedule = parseScheduleInput(req.body);
   const back = plid ? '/streams/playlist' : '/streams/single';
   if (schedule.error) {
@@ -135,8 +136,8 @@ router.post('/', (req, res) => {
   }
   const insert = db.prepare(`INSERT INTO streams
     (name, video_id, playlist_id, platform, rtmp_url, stream_key, loop_video,
-     re_encode, video_bitrate, keyframe_interval, preset, audio_id, audio_volume)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+     re_encode, video_bitrate, keyframe_interval, preset, audio_id, audio_volume, audio_mode)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
     name.trim(),
     effectiveVideoId,
     plid,
@@ -150,6 +151,7 @@ router.post('/', (req, res) => {
     (preset || 'veryfast').trim(),
     audioId,
     safeVol,
+    safeMode,
   );
   const scheduleCreated = insertSchedule(Number(insert.lastInsertRowid), schedule);
   const notice = scheduleCreated ? 'Stream+created+and+scheduled' : 'Stream+created';
@@ -243,7 +245,7 @@ router.post('/:id/edit', (req, res) => {
     return res.redirect(back + '?error=Stop+stream+first+before+editing');
   }
   const { name, video_id, playlist_id, platform, rtmp_url, stream_key, loop_video,
-          re_encode, video_bitrate, keyframe_interval, preset, audio_id, audio_volume } = req.body;
+          re_encode, video_bitrate, keyframe_interval, preset, audio_id, audio_volume, audio_mode } = req.body;
   if (!name || !rtmp_url) {
     return res.redirect(back + '?error=All+fields+are+required');
   }
@@ -258,11 +260,12 @@ router.post('/:id/edit', (req, res) => {
   }
   const audioId = Number(audio_id) || null;
   const vol = parseFloat(audio_volume);
-  const safeVol = (Number.isFinite(vol) && vol >= 0 && vol <= 2) ? String(vol) : '0.3';
+  const safeVol = (Number.isFinite(vol) && vol >= 0 && vol <= 10) ? String(vol) : '0.3';
+  const safeMode = (audio_mode === 'replace') ? 'replace' : 'mix';
   db.prepare(`UPDATE streams SET
     name=?, video_id=?, playlist_id=?, platform=?, rtmp_url=?, stream_key=?,
     loop_video=?, re_encode=?, video_bitrate=?, keyframe_interval=?, preset=?,
-    audio_id=?, audio_volume=?
+    audio_id=?, audio_volume=?, audio_mode=?
     WHERE id=?`).run(
     name.trim(),
     effectiveVideoId,
@@ -277,6 +280,7 @@ router.post('/:id/edit', (req, res) => {
     (preset || 'veryfast').trim(),
     audioId,
     safeVol,
+    safeMode,
     id,
   );
 

@@ -156,6 +156,7 @@ function ensureSchema() {
   add('playlist_id', 'INTEGER', 'NULL');
   add('audio_id', 'INTEGER', 'NULL');
   add('audio_volume', 'TEXT', "'0.3'");
+  add('audio_mode', 'TEXT', "'mix'");
 
   const vcols = db.prepare('PRAGMA table_info(videos)').all().map((c) => c.name);
   const addv = (name, type, def) => {

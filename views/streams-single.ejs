@@ -76,6 +76,7 @@
                       data-stream-preset="<%= s.preset || 'veryfast' %>"
                       data-stream-audio-id="<%= s.audio_id || '' %>"
                       data-stream-audio-volume="<%= s.audio_volume || '0.3' %>"
+                      data-stream-audio-mode="<%= s.audio_mode || 'mix' %>"
                       data-stream-scheduled="<%= s.next_start_at ? '1' : '0' %>"
                       data-stream-start-at="<%= s.next_start_at ? formatUTCToLocalInput(s.next_start_at) : '' %>"
                       data-stream-stop-at="<%= s.next_stop_at ? formatUTCToLocalInput(s.next_stop_at) : '' %>"
@@ -194,6 +195,12 @@
               </label>
               <label>Volume overlay <span class="muted small">(0.0 - 2.0+; 1.0 = normal, >1.0 = amplifikasi)</span>
                 <input type="number" name="audio_volume" value="0.3" min="0" max="10" step="0.1" style="max-width:100px;">
+              </label>
+              <label>Mode audio overlay <span class="muted small">(Mix vs Replace)</span>
+                <select name="audio_mode">
+                  <option value="mix" selected>Mix (Gabung suara video + musik)</option>
+                  <option value="replace">Replace (Ganti suara video dengan musik sepenuhnya)</option>
+                </select>
               </label>
             </div>
           </div>
@@ -341,6 +348,12 @@
           <label>Volume overlay <span class="muted small">(1.0 = normal, >1.0 = amplifikasi)</span>
             <input type="number" name="audio_volume" id="edit-stream-audio-volume" value="0.3" min="0" max="10" step="0.1" style="max-width:100px;">
           </label>
+          <label>Mode audio overlay
+            <select name="audio_mode" id="edit-stream-audio-mode">
+              <option value="mix">Mix (Gabung suara video + musik)</option>
+              <option value="replace">Replace (Ganti suara video dengan musik sepenuhnya)</option>
+            </select>
+          </label>
         </div>
       </div>
     </div>
@@ -432,6 +445,7 @@
     document.getElementById('edit-re-encode').value = btn.dataset.streamReEncode || '0';
     document.getElementById('edit-stream-audio-id').value = btn.dataset.streamAudioId || '';
     document.getElementById('edit-stream-audio-volume').value = btn.dataset.streamAudioVolume || '0.3';
+    document.getElementById('edit-stream-audio-mode').value = btn.dataset.streamAudioMode || 'mix';
     const isScheduled = btn.dataset.streamScheduled === '1';
     scheduleToggle.checked = isScheduled;
     document.getElementById('edit-stream-start-at').value = btn.dataset.streamStartAt || '';
