@@ -366,7 +366,7 @@ function register({ title, filename, size }) {
         bitrate=?,
         sample_rate=?,
         channels=?,
-        status='uploaded',
+        status='analyzing',
         normalized=0,
         last_error=NULL,
         status_log='[Uploaded] Metadata probed successfully.'
@@ -374,8 +374,24 @@ function register({ title, filename, size }) {
         info.duration, info.codec, info.bitrate, info.sampleRate, info.channels, id
       );
 
+      activeJobs.set(id, { percent: 0 });
+
       // Analyze loudness in background so details (LUFS, True Peak, LRA) are populated immediately
-      const measured = await analyzeLoudness(filePath);
+      const measured = await analyzeLoudness(
+        filePath,
+        (time) => {
+          if (info.duration) {
+            const pct = Math.min(99, Math.round((time / info.duration) * 100));
+            const job = activeJobs.get(id);
+            if (job) job.percent = pct;
+          }
+        },
+        (child) => {
+          const job = activeJobs.get(id);
+          if (job) job.process = child;
+        }
+      );
+
       if (measured) {
         // If codec is already AAC, sample rate is 48000 Hz, and loudness is close to -14 LUFS (+/- 1.5),
         // we can auto-normalize/mark as ready!
@@ -390,6 +406,7 @@ function register({ title, filename, size }) {
           true_peak_db=?,
           loudness_range=?,
           normalized=?,
+          status='uploaded',
           status_log = status_log || ?
           WHERE id=?`).run(
           measured.input_i,
@@ -399,10 +416,18 @@ function register({ title, filename, size }) {
           `\n[Analysis] Loudness: ${measured.input_i.toFixed(1)} LUFS (target: -14.0), True Peak: ${measured.input_tp.toFixed(1)} dBFS, LRA: ${measured.input_lra.toFixed(1)} LU. ${autoReady ? 'File matches streaming standards, auto-ready!' : 'Normalisation recommended to match AAC + -14 LUFS standard.'}`,
           id
         );
+      } else {
+        db.prepare(`UPDATE audio_tracks SET
+          status='uploaded',
+          last_error='Loudness analysis failed',
+          status_log = status_log || '\n[Analysis Failed] Loudness analysis failed. You can retry manually.'
+          WHERE id=?`).run(id);
       }
     } catch (e) {
       db.prepare(`UPDATE audio_tracks SET status='error', last_error=?
         WHERE id=?`).run(e.message, id);
+    } finally {
+      activeJobs.delete(id);
     }
   });
 
