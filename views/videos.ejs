@@ -970,6 +970,24 @@ document.addEventListener('modal:before-open', (e) => {
     }
   }, true);
 
+  // Prevent closing the modal when upload is in progress (ESC key)
+  dlg.addEventListener('cancel', (e) => {
+    if (submitBtn.disabled) {
+      e.preventDefault();
+    }
+  });
+
+  // Prevent closing the modal when upload is in progress (backdrop click or 'x' button)
+  dlg.addEventListener('click', (e) => {
+    if (submitBtn.disabled) {
+      const closeBtn = e.target.closest('[data-close-modal]');
+      if (closeBtn || e.target === dlg) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    }
+  }, true);
+
   dlg.addEventListener('modal:before-open', () => {
     progress.style.display = 'none';
     bar.style.width = '0%';

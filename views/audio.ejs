@@ -338,17 +338,27 @@
   // XHR upload with progress bar.
   const form = document.getElementById('upload-audio-form');
   if (form) {
+    const dlg = document.getElementById('upload-audio');
+    const cancelBtn = dlg.querySelector('button[data-close-modal]');
+    const progressDiv = document.getElementById('upload-audio-progress');
+    const bar = document.getElementById('upload-audio-bar');
+    const status = document.getElementById('upload-audio-status');
+    const submit = document.getElementById('upload-audio-submit');
+    let activeXhr = null;
+    let cancelled = false;
+
     form.addEventListener('submit', (e) => {
       e.preventDefault();
       const fd = new FormData(form);
       const xhr = new XMLHttpRequest();
-      const progressDiv = document.getElementById('upload-audio-progress');
-      const bar = document.getElementById('upload-audio-bar');
-      const status = document.getElementById('upload-audio-status');
-      const submit = document.getElementById('upload-audio-submit');
+      activeXhr = xhr;
+      cancelled = false;
+
       progressDiv.style.display = 'block';
       submit.disabled = true;
       submit.textContent = 'Uploading…';
+      cancelBtn.textContent = 'Batalkan upload';
+
       xhr.upload.onprogress = (ev) => {
         if (ev.lengthComputable) {
           const pct = Math.round((ev.loaded / ev.total) * 100);
@@ -359,6 +369,7 @@
         }
       };
       xhr.onload = () => {
+        activeXhr = null;
         if (xhr.status >= 200 && xhr.status < 400) {
           if (xhr.responseURL) {
             try {
@@ -373,16 +384,69 @@
         } else {
           submit.disabled = false;
           submit.textContent = 'Upload';
+          cancelBtn.textContent = 'Batal';
           status.textContent = 'Upload failed (HTTP ' + xhr.status + ')';
         }
       };
       xhr.onerror = () => {
+        activeXhr = null;
         submit.disabled = false;
         submit.textContent = 'Upload';
+        cancelBtn.textContent = 'Batal';
         status.textContent = 'Network error';
+      };
+      xhr.onabort = () => {
+        activeXhr = null;
+        submit.disabled = false;
+        submit.textContent = 'Upload';
+        cancelBtn.textContent = 'Batal';
+        status.textContent = 'Upload dibatalkan';
+        bar.style.width = '0%';
       };
       xhr.open('POST', '/audio/upload', true);
       xhr.send(fd);
+    });
+
+    cancelBtn.addEventListener('click', (e) => {
+      if (!submit.disabled) return; // not uploading, default close
+      e.preventDefault();
+      e.stopPropagation();
+      cancelled = true;
+      if (activeXhr && activeXhr.readyState !== XMLHttpRequest.DONE) {
+        try { activeXhr.abort(); } catch (_) {}
+        activeXhr = null;
+      }
+      window.__closeModal(dlg);
+    }, true);
+
+    // Prevent closing the modal when upload is in progress (ESC key)
+    dlg.addEventListener('cancel', (e) => {
+      if (submit.disabled) {
+        e.preventDefault();
+      }
+    });
+
+    // Prevent closing the modal when upload is in progress (backdrop click or 'x' button)
+    dlg.addEventListener('click', (e) => {
+      if (submit.disabled) {
+        const closeBtn = e.target.closest('[data-close-modal]');
+        if (closeBtn || e.target === dlg) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      }
+    }, true);
+
+    dlg.addEventListener('modal:before-open', () => {
+      progressDiv.style.display = 'none';
+      bar.style.width = '0%';
+      status.textContent = '0%';
+      submit.disabled = false;
+      submit.textContent = 'Upload';
+      cancelBtn.textContent = 'Batal';
+      cancelled = false;
+      activeXhr = null;
+      form.reset();
     });
   }
 
