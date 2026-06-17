@@ -327,7 +327,7 @@ function register({ title, filename, size }) {
   const id = Number(result.lastInsertRowid);
 
   // Probe in background so response isn't blocked.
-  setImmediate(() => {
+  setImmediate(async () => {
     try {
       const filePath = path.join(audioDir, filename);
       const info = probe(filePath);
@@ -352,6 +352,33 @@ function register({ title, filename, size }) {
         WHERE id=?`).run(
         info.duration, info.codec, info.bitrate, info.sampleRate, info.channels, id
       );
+
+      // Analyze loudness in background so details (LUFS, True Peak, LRA) are populated immediately
+      const measured = await analyzeLoudness(filePath);
+      if (measured) {
+        // If codec is already AAC, sample rate is 48000 Hz, and loudness is close to -14 LUFS (+/- 1.5),
+        // we can auto-normalize/mark as ready!
+        const isAlreadyAac = info.codec && info.codec.toLowerCase() === 'aac';
+        const isAlready48k = info.sampleRate === 48000;
+        const isLoudnessOk = Math.abs(measured.input_i - LOUDNESS_TARGET.I) <= 1.5;
+        const isPeakOk = measured.input_tp <= -1.0;
+        const autoReady = isAlreadyAac && isAlready48k && isLoudnessOk && isPeakOk;
+
+        db.prepare(`UPDATE audio_tracks SET
+          integrated_lufs=?,
+          true_peak_db=?,
+          loudness_range=?,
+          normalized=?,
+          status_log = status_log || ?
+          WHERE id=?`).run(
+          measured.input_i,
+          measured.input_tp,
+          measured.input_lra,
+          autoReady ? 1 : 0,
+          `\n[Analysis] Loudness: ${measured.input_i.toFixed(1)} LUFS (target: -14.0), True Peak: ${measured.input_tp.toFixed(1)} dBFS, LRA: ${measured.input_lra.toFixed(1)} LU. ${autoReady ? 'File matches streaming standards, auto-ready!' : 'Normalisation recommended to match AAC + -14 LUFS standard.'}`,
+          id
+        );
+      }
     } catch (e) {
       db.prepare(`UPDATE audio_tracks SET status='error', last_error=?
         WHERE id=?`).run(e.message, id);
