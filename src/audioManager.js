@@ -114,12 +114,25 @@ function analyzeLoudness(filePath, onProgress) {
     });
 
     child.on('close', (code) => {
-      if (code !== 0) return resolve(null);
+      if (code !== 0) {
+        try {
+          const logPath = path.join(logsDir, 'audio-normalize.log');
+          const tail = stderr.split('\n').slice(-30).join('\n');
+          fs.appendFileSync(logPath, `[${new Date().toISOString()}] analyzeLoudness failed (exit ${code}) for ${filePath}\n=== stderr tail ===\n${tail}\n=== end ===\n`);
+        } catch (_) {}
+        return resolve(null);
+      }
 
       // FFmpeg prints the JSON block at the end of stderr. Find it.
       const start = stderr.lastIndexOf('{');
       const end = stderr.lastIndexOf('}');
-      if (start === -1 || end === -1 || end <= start) return resolve(null);
+      if (start === -1 || end === -1 || end <= start) {
+        try {
+          const logPath = path.join(logsDir, 'audio-normalize.log');
+          fs.appendFileSync(logPath, `[${new Date().toISOString()}] analyzeLoudness JSON parse failed (braces not found) for ${filePath}\n=== stderr tail ===\n${stderr.slice(-500)}\n=== end ===\n`);
+        } catch (_) {}
+        return resolve(null);
+      }
 
       try {
         const json = JSON.parse(stderr.slice(start, end + 1));
@@ -130,11 +143,19 @@ function analyzeLoudness(filePath, onProgress) {
           input_thresh: parseFloat(json.input_thresh),
           target_offset: parseFloat(json.target_offset),
         });
-      } catch (_) {
+      } catch (err) {
+        try {
+          const logPath = path.join(logsDir, 'audio-normalize.log');
+          fs.appendFileSync(logPath, `[${new Date().toISOString()}] analyzeLoudness JSON parse error: ${err.message} for ${filePath}\n=== JSON text ===\n${stderr.slice(start, end + 1)}\n=== end ===\n`);
+        } catch (_) {}
         resolve(null);
       }
     });
-    child.on('error', () => {
+    child.on('error', (err) => {
+      try {
+        const logPath = path.join(logsDir, 'audio-normalize.log');
+        fs.appendFileSync(logPath, `[${new Date().toISOString()}] analyzeLoudness spawned child error: ${err.message} for ${filePath}\n`);
+      } catch (_) {}
       resolve(null);
     });
   });

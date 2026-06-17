@@ -216,6 +216,84 @@ router.post('/:id/normalize', (req, res) => {
   res.redirect('/audio?notice=Normalization+started+in+background');
 });
 
+// POST /audio/:id/analyze -> Start background loudness analysis (without normalising/transcoding)
+router.post('/:id/analyze', (req, res) => {
+  const id = Number(req.params.id);
+  const track = audioManager.get(id);
+  if (!track) return res.redirect('/audio?error=Track+not+found');
+  const filePath = audioManager.getFilePath(id);
+  if (!filePath) return res.redirect('/audio?error=File+missing+on+disk');
+
+  const { db } = require('../db');
+  const logTime = () => `[${new Date().toLocaleTimeString('en-US', { hour12: false })}]`;
+
+  db.prepare(`UPDATE audio_tracks SET status='analyzing', status_log=?, last_error=NULL WHERE id=?`)
+    .run(`${logTime()} Starting manual loudness analysis...\n`, id);
+
+  audioManager.activeJobs.set(id, { percent: 0 });
+
+  setImmediate(async () => {
+    const appendLog = (msg) => {
+      db.prepare(`UPDATE audio_tracks SET status_log = COALESCE(status_log, '') || ? WHERE id=?`)
+        .run(`${logTime()} ${msg}\n`, id);
+    };
+
+    try {
+      appendLog('Analyzing loudness...');
+      const measured = await audioManager.analyzeLoudness(
+        filePath,
+        (time) => {
+          if (track.duration_seconds) {
+            const pct = Math.min(99, Math.round((time / track.duration_seconds) * 100));
+            const job = audioManager.activeJobs.get(id);
+            if (job) job.percent = pct;
+          }
+        },
+        (child) => {
+          const job = audioManager.activeJobs.get(id);
+          if (job) job.process = child;
+        }
+      );
+
+      if (!measured) {
+        db.prepare(`UPDATE audio_tracks SET status='uploaded', last_error=?, status_log = COALESCE(status_log, '') || ? WHERE id=?`)
+          .run('Analysis failed', `${logTime()} Error: Loudness analysis failed. Check logs/audio-normalize.log for details.\n`, id);
+        return;
+      }
+
+      const isAlreadyAac = track.codec && track.codec.toLowerCase() === 'aac';
+      const isAlready48k = track.sample_rate === 48000;
+      const isLoudnessOk = Math.abs(measured.input_i - audioManager.LOUDNESS_TARGET.I) <= 1.5;
+      const isPeakOk = measured.input_tp <= -1.0;
+      const autoReady = isAlreadyAac && isAlready48k && isLoudnessOk && isPeakOk;
+
+      db.prepare(`UPDATE audio_tracks SET
+        integrated_lufs=?,
+        true_peak_db=?,
+        loudness_range=?,
+        normalized=?,
+        status='uploaded',
+        last_error=NULL,
+        status_log = COALESCE(status_log, '') || ?
+        WHERE id=?`).run(
+        measured.input_i,
+        measured.input_tp,
+        measured.input_lra,
+        autoReady ? 1 : 0,
+        `${logTime()} Analysis complete! LUFS: ${measured.input_i.toFixed(1)}, Peak: ${measured.input_tp.toFixed(1)}. ${autoReady ? 'File matches standards, marked as ready.' : 'Analysis finished.'}\n`,
+        id
+      );
+    } catch (e) {
+      db.prepare(`UPDATE audio_tracks SET status='uploaded', last_error=?, status_log = COALESCE(status_log, '') || ? WHERE id=?`)
+        .run('Analysis crashed: ' + e.message, `${logTime()} Crash: ${e.message}\n`, id);
+    } finally {
+      audioManager.activeJobs.delete(id);
+    }
+  });
+
+  res.redirect('/audio?notice=Loudness+analysis+started');
+});
+
 // GET /audio/:id/status -> Polling endpoint for status & logs
 router.get('/:id/status', (req, res) => {
   const track = audioManager.get(req.params.id);

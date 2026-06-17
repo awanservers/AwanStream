@@ -65,6 +65,15 @@
                         title="Klik untuk detail">
                   normalizing <span data-progress-badge-pct="<%= t.id %>">…</span>
                 </button>
+              <% } else if (t.status === 'analyzing') { %>
+                <button type="button"
+                        class="badge badge-idle badge-btn"
+                        data-open-modal="audio-job-detail"
+                        data-audio-id="<%= t.id %>"
+                        data-audio-title="<%= t.title %>"
+                        title="Klik untuk detail">
+                  analyzing <span data-progress-badge-pct="<%= t.id %>">…</span>
+                </button>
               <% } else if (t.status === 'error') { %>
                 <button type="button"
                         class="badge badge-error badge-btn"
@@ -91,14 +100,14 @@
               <% } %>
             </td>
             <td class="actions">
-              <% if (t.status === 'normalizing') { %>
+              <% if (t.status === 'normalizing' || t.status === 'analyzing') { %>
                 <button type="button" class="btn btn-link"
                         data-open-modal="audio-job-detail"
                         data-audio-id="<%= t.id %>"
                         data-audio-title="<%= t.title %>">Details</button>
                 <form method="POST" action="/audio/<%= t.id %>/cancel" class="inline"
-                      data-confirm="Batalkan normalisasi audio '<%= t.title %>'?"
-                      data-confirm-title="Batalkan Normalisasi"
+                      data-confirm="Batalkan proses '<%= t.title %>'?"
+                      data-confirm-title="Batalkan Proses"
                       data-confirm-action="Batalkan"
                       style="margin: 0; display: inline;">
                   <button class="btn btn-link" style="color:#ef4444; margin-left: 8px; padding: 0; border: none; background: none; font-size: inherit; cursor: pointer;" type="submit">Cancel</button>
@@ -292,7 +301,10 @@
         </div>
       </div>
     </div>
-    <footer class="modal-footer">
+    <footer class="modal-footer" style="display: flex; gap: 0.5rem; justify-content: flex-end;">
+      <form id="form-analyze-audio" method="POST" action="" style="margin: 0;">
+        <button type="submit" class="btn btn-secondary" id="btn-detect-loudness">Deteksi Loudness</button>
+      </form>
       <button type="button" data-close-modal class="btn btn-primary">Tutup</button>
     </footer>
   </div>
@@ -595,6 +607,17 @@
         detailDlg.querySelector('#det-lufs').textContent = t.integrated_lufs != null ? t.integrated_lufs.toFixed(2) + ' LUFS' : 'N/A';
         detailDlg.querySelector('#det-peak').textContent = t.true_peak_db != null ? t.true_peak_db.toFixed(2) + ' dBFS' : 'N/A';
         detailDlg.querySelector('#det-lra').textContent = t.loudness_range != null ? t.loudness_range.toFixed(2) + ' LU' : 'N/A';
+        
+        const formAnalyze = detailDlg.querySelector('#form-analyze-audio');
+        const btnDetect = detailDlg.querySelector('#btn-detect-loudness');
+        if (formAnalyze && btnDetect) {
+          formAnalyze.action = '/audio/' + t.id + '/analyze';
+          if (t.integrated_lufs == null && t.status !== 'analyzing') {
+            formAnalyze.style.display = 'inline-block';
+          } else {
+            formAnalyze.style.display = 'none';
+          }
+        }
       } catch (err) {
         detailDlg.querySelectorAll('.detail-value').forEach(el => el.textContent = 'Error');
       }
@@ -612,7 +635,7 @@
         const r = await fetch('/audio/' + id + '/status', { cache: 'no-store' });
         if (!r.ok) return;
         const d = await r.json();
-        if (d.status !== 'normalizing') {
+        if (d.status !== 'normalizing' && d.status !== 'analyzing') {
           window.location.reload();
           return;
         }
