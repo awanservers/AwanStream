@@ -523,10 +523,20 @@
         badgeEl.textContent = d.percent != null ? (d.status === 'analyzing' ? 'analyzing' : 'normalizing') + ' (' + d.percent + '%)' : d.status;
         
         const cancelForm = document.getElementById('job-cancel-form');
-        if (cancelForm) {
+        const cancelBtn = document.getElementById('job-cancel-btn');
+        if (cancelForm && cancelBtn) {
           if (d.status === 'normalizing' || d.status === 'analyzing') {
             cancelForm.style.display = 'block';
             cancelForm.action = '/audio/' + d.id + '/cancel';
+            if (d.status === 'analyzing') {
+              cancelBtn.textContent = 'Cancel Analysis';
+              cancelForm.setAttribute('data-confirm', "Batalkan proses analisis audio?");
+              cancelForm.setAttribute('data-confirm-title', 'Batalkan Analisis');
+            } else {
+              cancelBtn.textContent = 'Cancel Normalization';
+              cancelForm.setAttribute('data-confirm', "Batalkan normalisasi audio?");
+              cancelForm.setAttribute('data-confirm-title', 'Batalkan Normalisasi');
+            }
           } else {
             cancelForm.style.display = 'none';
           }
