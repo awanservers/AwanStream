@@ -256,8 +256,14 @@ router.post('/:id/analyze', (req, res) => {
       );
 
       if (!measured) {
+        const job = audioManager.activeJobs.get(id);
+        const wasCancelled = job && job.cancelled;
         db.prepare(`UPDATE audio_tracks SET status='uploaded', last_error=?, status_log = COALESCE(status_log, '') || ? WHERE id=?`)
-          .run('Analysis failed', `${logTime()} Error: Loudness analysis failed. Check logs/audio-normalize.log for details.\n`, id);
+          .run(
+            wasCancelled ? null : 'Analysis failed',
+            wasCancelled ? `${logTime()} Analysis cancelled by user.\n` : `${logTime()} Error: Loudness analysis failed. Check logs/audio-normalize.log for details.\n`,
+            id
+          );
         return;
       }
 
@@ -311,11 +317,19 @@ router.get('/:id/status', (req, res) => {
   });
 });
 
-// POST /audio/:id/cancel -> Cancel running normalization
+// POST /audio/:id/cancel -> Cancel running normalization/analysis
 router.post('/:id/cancel', (req, res) => {
   const id = Number(req.params.id);
+  const track = audioManager.get(id);
+  const wasAnalyzing = track && track.status === 'analyzing';
+
   audioManager.cancel(id);
-  res.redirect('/audio?notice=Normalization+cancelled');
+
+  if (wasAnalyzing) {
+    res.redirect('/audio?notice=Loudness+analysis+cancelled');
+  } else {
+    res.redirect('/audio?notice=Normalization+cancelled');
+  }
 });
 
 // GET /audio/:id/metadata -> Detail info endpoint

@@ -77,7 +77,7 @@ function isSupportedFilename(filename) {
  * Returns measurement object on success, null on failure.
  *   { input_i, input_tp, input_lra, input_thresh, target_offset }
  */
-function analyzeLoudness(filePath, onProgress) {
+function analyzeLoudness(filePath, onProgress, onSpawn) {
   return new Promise((resolve) => {
     const args = [
       '-hide_banner', '-nostats',
@@ -87,6 +87,7 @@ function analyzeLoudness(filePath, onProgress) {
       '-f', 'null', '-',
     ];
     const child = spawn('ffmpeg', args);
+    if (onSpawn) onSpawn(child);
     let stderr = '';
     child.stderr.on('data', (data) => {
       stderr += data.toString();
@@ -417,11 +418,17 @@ function register({ title, filename, size }) {
           id
         );
       } else {
+        const job = activeJobs.get(id);
+        const wasCancelled = job && job.cancelled;
         db.prepare(`UPDATE audio_tracks SET
           status='uploaded',
-          last_error='Loudness analysis failed',
-          status_log = status_log || '\n[Analysis Failed] Loudness analysis failed. You can retry manually.'
-          WHERE id=?`).run(id);
+          last_error=?,
+          status_log = status_log || ?
+          WHERE id=?`).run(
+          wasCancelled ? null : 'Loudness analysis failed',
+          wasCancelled ? '\n[Analysis Cancelled] Loudness analysis cancelled by user.' : '\n[Analysis Failed] Loudness analysis failed. You can retry manually.',
+          id
+        );
       }
     } catch (e) {
       db.prepare(`UPDATE audio_tracks SET status='error', last_error=?
@@ -509,10 +516,10 @@ function cancel(id) {
 }
 
 function reconcileOnBoot() {
-  // Reset any audio stuck in 'normalizing' status to 'uploaded' on boot,
+  // Reset any audio stuck in 'normalizing' or 'analyzing' status to 'uploaded' on boot,
   // since background jobs would have been terminated if the process was killed.
   try {
-    db.prepare("UPDATE audio_tracks SET status='uploaded' WHERE status='normalizing'").run();
+    db.prepare("UPDATE audio_tracks SET status='uploaded' WHERE status IN ('normalizing', 'analyzing')").run();
   } catch (_) {}
 }
 
