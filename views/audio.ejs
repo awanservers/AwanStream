@@ -169,7 +169,7 @@
         </div>
       </div>
       <footer class="modal-footer">
-        <button type="button" class="btn" data-close-modal>Batal</button>
+        <button type="button" class="btn" data-close-modal id="upload-audio-cancel">Batal</button>
         <button type="submit" class="btn btn-primary" id="upload-audio-submit">Upload</button>
       </footer>
     </form>
@@ -339,7 +339,7 @@
   const form = document.getElementById('upload-audio-form');
   if (form) {
     const dlg = document.getElementById('upload-audio');
-    const cancelBtn = dlg.querySelector('button[data-close-modal]');
+    const cancelBtn = document.getElementById('upload-audio-cancel');
     const progressDiv = document.getElementById('upload-audio-progress');
     const bar = document.getElementById('upload-audio-bar');
     const status = document.getElementById('upload-audio-status');
