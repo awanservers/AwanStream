@@ -513,12 +513,12 @@
         const d = await r.json();
         
         titleEl.textContent = d.title || 'Normalize Detail';
-        badgeEl.className = 'badge badge-' + (d.status === 'normalizing' ? 'idle' : d.status === 'error' ? 'error' : 'running');
-        badgeEl.textContent = d.percent != null ? 'normalizing (' + d.percent + '%)' : d.status;
+        badgeEl.className = 'badge badge-' + ((d.status === 'normalizing' || d.status === 'analyzing') ? 'idle' : d.status === 'error' ? 'error' : 'running');
+        badgeEl.textContent = d.percent != null ? (d.status === 'analyzing' ? 'analyzing' : 'normalizing') + ' (' + d.percent + '%)' : d.status;
         
         const cancelForm = document.getElementById('job-cancel-form');
         if (cancelForm) {
-          if (d.status === 'normalizing') {
+          if (d.status === 'normalizing' || d.status === 'analyzing') {
             cancelForm.style.display = 'block';
             cancelForm.action = '/audio/' + d.id + '/cancel';
           } else {
@@ -532,7 +532,7 @@
           if (nearBottom) logEl.scrollTop = logEl.scrollHeight;
         }
         
-        if (d.status !== 'normalizing' && !jobDlg.dataset.reloadScheduled) {
+        if (d.status !== 'normalizing' && d.status !== 'analyzing' && !jobDlg.dataset.reloadScheduled) {
           jobDlg.dataset.reloadScheduled = '1';
           setTimeout(() => { if (!jobDlg.open) window.location.reload(); }, 2500);
         }
