@@ -153,7 +153,7 @@ router.post('/:id/move-up/:itemId', (req, res) => {
       db.prepare('UPDATE playlist_items SET position=? WHERE id=?').run(item.position - 1, item.id);
     }
   }
-  res.redirect(`/playlists/${req.params.id}`);
+  res.redirect(`/playlists/${req.params.id}?notice=Video+moved`);
 });
 
 router.post('/:id/move-down/:itemId', (req, res) => {
@@ -166,7 +166,7 @@ router.post('/:id/move-down/:itemId', (req, res) => {
       db.prepare('UPDATE playlist_items SET position=? WHERE id=?').run(item.position + 1, item.id);
     }
   }
-  res.redirect(`/playlists/${req.params.id}`);
+  res.redirect(`/playlists/${req.params.id}?notice=Video+moved`);
 });
 
 router.post('/:id/delete', (req, res) => {

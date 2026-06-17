@@ -3,33 +3,75 @@ const { db } = require('../db');
 const looper = require('../looper');
 const audioManager = require('../audioManager');
 const diskCheck = require('../diskCheck');
+const youtubeManager = require('../youtubeManager');
+const youtubeUploader = require('../youtubeUploader');
 
 const router = express.Router();
 
 // Preset target durations in seconds, displayed on the form.
 const PRESETS = [
-  { key: '30m',  label: '30 minutes', seconds: 30 * 60 },
-  { key: '1h',   label: '1 hour',     seconds: 1 * 3600 },
-  { key: '2h',   label: '2 hours',    seconds: 2 * 3600 },
-  { key: '3h',   label: '3 hours',    seconds: 3 * 3600 },
-  { key: '6h',   label: '6 hours',    seconds: 6 * 3600 },
-  { key: '12h',  label: '12 hours',   seconds: 12 * 3600 },
-  { key: '24h',  label: '24 hours',   seconds: 24 * 3600 },
+  { key: '30m',  label: '30 menit', seconds: 30 * 60 },
+  { key: '1h',   label: '1 jam',     seconds: 1 * 3600 },
+  { key: '3h',   label: '3 jam',    seconds: 3 * 3600 },
+  { key: '10h',  label: '10 jam',   seconds: 10 * 3600 },
 ];
 
 router.get('/', (req, res) => {
-  // Eligible sources: anything with a valid duration on disk. We show
-  // 'ready', 'uploaded', and 'error' (in case user wants to retry). We hide
-  // rows currently transcoding/downloading to avoid file-in-use conflicts.
+  // Eligible source videos: must be status = 'ready' and loop_job_id IS NULL (main library only)
   const videos = db.prepare(`
     SELECT id, title, filename, duration_seconds, src_width, src_height,
            size_bytes, thumbnail, status, folder_id, created_at
     FROM videos
-    WHERE status IN ('ready', 'uploaded')
+    WHERE status = 'ready'
+      AND loop_job_id IS NULL
       AND duration_seconds IS NOT NULL
       AND duration_seconds > 0
     ORDER BY created_at DESC
   `).all();
+
+  // Paginate completed loop videos
+  const page = Math.max(1, Number(req.query.page) || 1);
+  const perPage = 20;
+  const offset = (page - 1) * perPage;
+
+  const totalCount = db.prepare('SELECT COUNT(*) AS c FROM videos WHERE loop_job_id IS NOT NULL').get().c;
+  const loopedVideos = db.prepare(
+    'SELECT * FROM videos WHERE loop_job_id IS NOT NULL ORDER BY created_at DESC LIMIT ? OFFSET ?'
+  ).all(perPage, offset);
+
+  const totalPages = Math.max(1, Math.ceil(totalCount / perPage));
+
+  const folders = db.prepare('SELECT * FROM folders ORDER BY name ASC').all();
+  const youtubeConnected = !!youtubeManager.getAccount();
+
+  // Annotate each loop video with its latest YouTube upload state (if any).
+  const activeJobsYt = youtubeUploader.listJobs();
+  const activeByVideoId = new Map();
+  activeJobsYt.forEach((j) => {
+    if (j.status === 'pending' || j.status === 'uploading') {
+      activeByVideoId.set(j.videoId, j);
+    }
+  });
+
+  loopedVideos.forEach((v) => {
+    const active = activeByVideoId.get(v.id);
+    if (active) {
+      v.youtube_status = active.status;
+      v.youtube_percent = active.percent;
+      v.youtube_job_id = active.jobId;
+      v.youtube_video_id = null;
+    } else {
+      const last = youtubeUploader.getLatestUploadForVideo(v.id);
+      if (last) {
+        v.youtube_status = last.status;
+        v.youtube_percent = last.percent;
+        v.youtube_video_id = last.youtube_video_id;
+        v.youtube_last_error = last.last_error;
+        v.youtube_interrupted = last.status === 'error' &&
+          last.last_error && /interrupted by server restart/i.test(last.last_error);
+      }
+    }
+  });
 
   const activeJobs = looper.listJobs().map((j) => {
     const src = db.prepare('SELECT title FROM videos WHERE id=?').get(j.sourceVideoId);
@@ -57,6 +99,13 @@ router.get('/', (req, res) => {
     activeNav: 'looper',
     videos,
     presets: PRESETS,
+    loopedVideos,
+    folders,
+    youtubeConnected,
+    page,
+    perPage,
+    totalPages,
+    totalCount,
     activeJobs,
     recentErrors,
     audioTracks,
@@ -128,10 +177,16 @@ router.post('/start', (req, res) => {
     });
     const modeLabel = mode === 'smooth' ? 'Smooth mode (seamless crossfade)' : 'Fast mode';
     const audioLabel = audioId ? ` + audio overlay (${audioMode})` : '';
+    if (req.xhr || req.headers.accept?.includes('json')) {
+      return res.json({ ok: true, jobId });
+    }
     return res.redirect('/looper?notice=' + encodeURIComponent(
-      `${modeLabel}${audioLabel} — job #${jobId} started. Video baru akan muncul di Library setelah selesai.`
+      `${modeLabel}${audioLabel} — job #${jobId} started. Video baru akan muncul di menu Looping setelah selesai.`
     ));
   } catch (err) {
+    if (req.xhr || req.headers.accept?.includes('json')) {
+      return res.status(400).json({ error: err.message });
+    }
     return res.redirect('/looper?error=' + encodeURIComponent(err.message));
   }
 });
@@ -172,7 +227,13 @@ router.get('/progress', (req, res) => {
 router.post('/:jobId/cancel', (req, res) => {
   const ok = looper.cancel(req.params.jobId);
   if (!ok) {
+    if (req.xhr || req.headers.accept?.includes('json')) {
+      return res.status(404).json({ error: 'Job tidak ditemukan atau sudah selesai.' });
+    }
     return res.redirect('/looper?error=' + encodeURIComponent('Job tidak ditemukan atau sudah selesai.'));
+  }
+  if (req.xhr || req.headers.accept?.includes('json')) {
+    return res.json({ ok: true });
   }
   return res.redirect('/looper?notice=' + encodeURIComponent('Loop job cancelled.'));
 });

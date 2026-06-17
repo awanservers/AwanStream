@@ -173,6 +173,9 @@ app.locals.formatTimeShort = (value) => {
   return `${shortFmt.format(d)} ${TZ_LABEL}`;
 };
 
+const { formatUTCToLocalInput } = require('./src/timezone');
+app.locals.formatUTCToLocalInput = (value) => formatUTCToLocalInput(value, TZ);
+
 // Build/version info — surfaced in the UI so you can verify which container
 // is actually serving the request. Resolution order:
 //   1. APP_VERSION env (set in CI: APP_VERSION=$(git rev-parse --short HEAD))

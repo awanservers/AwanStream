@@ -16,83 +16,127 @@
   </div>
 <% } else { %>
   <div class="table-wrap card card-flush">
-    <table class="table audio-table">
+    <table class="table videos-table audio-table">
       <thead><tr>
-        <th>Title</th>
-        <th>Format</th>
-        <th>Duration</th>
-        <th>Bitrate</th>
-        <th>Loudness</th>
-        <th>Size</th>
-        <th>Status</th>
-        <th>Uploaded</th>
-        <th>Actions</th>
+        <th class="col-w-thumb"></th>
+        <th class="col-w-title">Title</th>
+        <th class="col-w-status">Status</th>
+        <th class="col-w-actions">Actions</th>
       </tr></thead>
       <tbody>
-        <% tracks.forEach(t => {
-             const dur = t.duration_seconds
-               ? (t.duration_seconds >= 60
-                   ? Math.floor(t.duration_seconds / 60) + 'm ' + Math.round(t.duration_seconds % 60) + 's'
-                   : Math.round(t.duration_seconds) + 's')
-               : '-';
-             const sizeMb = t.size_bytes ? (t.size_bytes / (1024 * 1024)).toFixed(1) + ' MB' : '-';
-             const bitrate = t.bitrate ? Math.round(t.bitrate / 1000) + ' kbps' : '-';
-             const codec = t.codec ? t.codec.toUpperCase() : '-';
-             const ch = t.channels === 1 ? 'mono' : (t.channels === 2 ? 'stereo' : '');
-             const lufs = (t.integrated_lufs !== null && t.integrated_lufs !== undefined)
-               ? t.integrated_lufs.toFixed(1) + ' LUFS' : '';
-             const peak = (t.true_peak_db !== null && t.true_peak_db !== undefined)
-               ? t.true_peak_db.toFixed(1) + ' dB' : '';
-        %>
+        <% tracks.forEach(t => { %>
           <tr>
-            <td class="truncate" title="<%= t.title %>"><%= t.title %></td>
-            <td class="small muted"><%= codec %><% if (ch) { %> · <%= ch %><% } %></td>
-            <td class="small muted"><%= dur %></td>
-            <td class="small muted"><%= bitrate %></td>
-            <td class="small muted">
-              <% if (t.normalized) { %>
-                <span title="Normalized to -14 LUFS (YouTube standard). Source was <%= lufs %>, peak <%= peak %>." style="color:#22c55e;">
-                  ✓ -14 LUFS
-                </span>
-                <% if (lufs) { %><div class="small muted" style="font-size:0.7rem;">src: <%= lufs %></div><% } %>
-              <% } else if (lufs) { %>
-                <%= lufs %>
+            <td class="col-thumb">
+              <button type="button" class="video-thumb-btn"
+                      style="background: var(--border); border-radius: 6px; display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: none; cursor: pointer; transition: background 0.2s;"
+                      data-open-modal="audio-preview"
+                      data-audio-src="/audio/<%= t.id %>/download"
+                      data-audio-title="<%= t.title %>"
+                      title="Preview audio">
+                <span style="font-size: 1.2rem;">🎵</span>
+              </button>
+            </td>
+            <td class="video-title-cell">
+              <div class="video-title" title="<%= t.title %>"><%= t.title %></div>
+              <div class="video-meta small muted">
+                <%= t.size_bytes ? (t.size_bytes / (1024 * 1024)).toFixed(1) + ' MB' : '-' %>
+                · <%= formatTime(t.created_at) %>
+                <% if (t.duration_seconds) { %>
+                  <% const dur = Math.round(t.duration_seconds); %>
+                  <% const m = Math.floor(dur / 60); %>
+                  <% const s = dur % 60; %>
+                  · <%= m %>m <%= s %>s
+                <% } %>
+                <% if (t.codec) { %>
+                  · <%= t.codec.toUpperCase() %><% if (t.channels) { %> (<%= t.channels === 1 ? 'mono' : 'stereo' %>)<% } %>
+                <% } %>
+                <% if (t.normalized) { %>
+                  · <span style="color:#22c55e; font-weight: 500;">✓ -14 LUFS</span>
+                <% } %>
+              </div>
+            </td>
+            <td>
+              <% if (t.status === 'normalizing') { %>
+                <button type="button"
+                        class="badge badge-idle badge-btn"
+                        data-open-modal="audio-job-detail"
+                        data-audio-id="<%= t.id %>"
+                        data-audio-title="<%= t.title %>"
+                        title="Klik untuk detail">
+                  normalizing <span data-progress-badge-pct="<%= t.id %>">…</span>
+                </button>
+              <% } else if (t.status === 'error') { %>
+                <button type="button"
+                        class="badge badge-error badge-btn"
+                        data-open-modal="audio-job-detail"
+                        data-audio-id="<%= t.id %>"
+                        data-audio-title="<%= t.title %>"
+                        title="Lihat log error">
+                  error
+                </button>
               <% } else { %>
-                -
+                <% if (t._readiness) { %>
+                  <% if (t._readiness.level === 'ready') { %>
+                    <span class="badge badge-running" title="<%= t._readiness.reasons.join(' · ') %>">✓ ready</span>
+                  <% } else if (t._readiness.level === 'ok') { %>
+                    <span class="badge badge-warn" title="<%= t._readiness.reasons.join(' · ') %>">⚠ suboptimal</span>
+                  <% } else if (t._readiness.level === 'needs-normalize') { %>
+                    <span class="badge badge-idle" title="<%= t._readiness.reasons.join(' · ') %>">⚠ needs normalize</span>
+                  <% } else { %>
+                    <span class="badge badge-running">ready</span>
+                  <% } %>
+                <% } else { %>
+                  <span class="badge badge-running">ready</span>
+                <% } %>
               <% } %>
             </td>
-            <td class="small muted"><%= sizeMb %></td>
-            <td>
-              <span class="badge badge-<%= t.status === 'uploaded' ? 'ready' : t.status %>"><%= t.status %></span>
-              <% if (t.last_error) { %><div class="small muted"><%= t.last_error %></div><% } %>
-            </td>
-            <td class="small muted"><%= formatTime(t.created_at) %></td>
             <td class="actions">
-              <button type="button" class="btn-icon"
-                      data-open-modal="rename-audio"
-                      data-audio-id="<%= t.id %>"
-                      data-audio-title="<%= t.title %>"
-                      title="Rename">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-              </button>
-              <% if (!t.normalized || (t.last_error && /normalization/i.test(t.last_error))) { %>
-                <form method="POST" action="/audio/<%= t.id %>/normalize" class="inline" title="Re-normalize loudness">
-                  <button type="submit" class="btn-icon" style="color:#f59e0b;">
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+              <% if (t.status === 'normalizing') { %>
+                <button type="button" class="btn btn-link"
+                        data-open-modal="audio-job-detail"
+                        data-audio-id="<%= t.id %>"
+                        data-audio-title="<%= t.title %>">Details</button>
+                <form method="POST" action="/audio/<%= t.id %>/cancel" class="inline"
+                      data-confirm="Batalkan normalisasi audio '<%= t.title %>'?"
+                      data-confirm-title="Batalkan Normalisasi"
+                      data-confirm-action="Batalkan"
+                      style="margin: 0; display: inline;">
+                  <button class="btn btn-link" style="color:#ef4444; margin-left: 8px; padding: 0; border: none; background: none; font-size: inherit; cursor: pointer;" type="submit">Cancel</button>
+                </form>
+              <% } else { %>
+                <button type="button" class="btn-icon"
+                        data-open-modal="audio-detail"
+                        data-audio-id="<%= t.id %>"
+                        data-audio-title="<%= t.title %>"
+                        title="Detail Audio">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                </button>
+                <% if (!t.normalized) { %>
+                  <form method="POST" action="/audio/<%= t.id %>/normalize" class="inline" title="Normalize loudness to -14 LUFS">
+                    <button type="submit" class="btn-icon" style="color:#f59e0b;">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                    </button>
+                  </form>
+                <% } %>
+                <button type="button" class="btn-icon"
+                        data-open-modal="rename-audio"
+                        data-audio-id="<%= t.id %>"
+                        data-audio-title="<%= t.title %>"
+                        title="Rename">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                </button>
+                <a href="/audio/<%= t.id %>/download" class="btn-icon" title="Download" download>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                </a>
+                <form method="POST" action="/audio/<%= t.id %>/delete" class="inline"
+                      data-confirm="Hapus audio '<%= t.title %>'?"
+                      data-confirm-title="Hapus audio"
+                      data-confirm-action="Hapus">
+                  <button class="btn-icon btn-icon-danger" type="submit" title="Delete">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
                   </button>
                 </form>
               <% } %>
-              <a href="/audio/<%= t.id %>/download" class="btn-icon" title="Download" download>
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-              </a>
-              <form method="POST" action="/audio/<%= t.id %>/delete" class="inline"
-                    data-confirm="Hapus audio '<%= t.title %>'?"
-                    data-confirm-title="Hapus audio"
-                    data-confirm-action="Hapus">
-                <button class="btn-icon btn-icon-danger" type="submit" title="Delete">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
-                </button>
-              </form>
             </td>
           </tr>
         <% }) %>
@@ -113,7 +157,7 @@
         <div class="grid-2">
           <label class="full">File
             <input type="file" name="audio" accept=".mp3,.m4a,.aac,.wav,.ogg,.opus,.flac,.wma,audio/*" required>
-            <span class="small muted">Max 500 MB. Format: MP3, M4A, AAC, WAV, OGG, OPUS, FLAC, WMA. Setelah upload, audio otomatis di-normalize ke -14 LUFS (YouTube standard) untuk loudness konsisten antar track.</span>
+            <span class="small muted">Max 2 GB. Format: MP3, M4A, AAC, WAV, OGG, OPUS, FLAC, WMA. Setelah di-upload, jalankan normalisasi manual di daftar lagu untuk meratakan tingkat kekerasan suara (loudness).</span>
           </label>
           <label class="full">Title <span class="muted small">(opsional)</span>
             <input type="text" name="title" placeholder="Kosongkan untuk pakai nama file">
@@ -153,6 +197,142 @@
   </div>
 </dialog>
 
+<!-- Audio Preview Player Modal -->
+<dialog id="audio-preview" class="modal modal-sm">
+  <div class="modal-card">
+    <header class="modal-header">
+      <h2 id="preview-title">Preview Audio</h2>
+      <button type="button" class="modal-close" data-close-modal aria-label="Close">×</button>
+    </header>
+    <div class="modal-body" style="background:var(--panel); padding: 1.5rem; border-radius:0 0 12px 12px">
+      <audio id="preview-player" controls style="width:100%; display:block">
+        Your browser does not support the audio tag.
+      </audio>
+    </div>
+    <footer class="modal-footer">
+      <button type="button" class="btn btn-primary" data-close-modal>Close</button>
+    </footer>
+  </div>
+</dialog>
+
+<!-- Audio Job Detail Progress Modal -->
+<dialog id="audio-job-detail" class="modal modal-md">
+  <div class="modal-card" style="max-height: 85vh; display: flex; flex-direction: column;">
+    <header class="modal-header">
+      <h2 id="job-title">Normalize Detail</h2>
+      <button type="button" class="modal-close" data-close-modal aria-label="Close">×</button>
+    </header>
+    <div class="modal-body" style="flex: 1; overflow-y: auto; padding: 1.5rem;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <div>Status: <span id="job-badge" class="badge">loading</span></div>
+      </div>
+      <label>Activity Log</label>
+      <pre id="job-log" class="code-block" style="background:#0f111a; color:#a6accd; padding:1rem; border-radius:6px; font-family:monospace; font-size:0.85rem; max-height: 250px; overflow-y: auto; white-space: pre-wrap; margin:0.5rem 0 0 0;"></pre>
+    </div>
+    <footer class="modal-footer" style="display: flex; gap: 8px; justify-content: flex-end; align-items: center;">
+      <form id="job-cancel-form" method="POST" action="" style="display: none; margin: 0;"
+            data-confirm="Batalkan normalisasi audio?"
+            data-confirm-title="Batalkan Normalisasi"
+            data-confirm-action="Batalkan">
+        <button type="submit" class="btn btn-danger" style="background-color: #ef4444; border-color: #ef4444; color: #ffffff;">Cancel Normalization</button>
+      </form>
+      <button type="button" data-close-modal class="btn btn-primary">Close</button>
+    </footer>
+  </div>
+</dialog>
+
+<!-- Audio Technical Details Modal -->
+<dialog id="audio-detail" class="modal modal-md">
+  <div class="modal-card">
+    <header class="modal-header">
+      <h2 id="detail-title">Detail Audio</h2>
+      <button type="button" class="modal-close" data-close-modal aria-label="Close">×</button>
+    </header>
+    <div class="modal-body" style="padding: 1.5rem;">
+      <div class="detail-grid">
+        <div class="detail-item">
+          <span class="detail-label">File Size</span>
+          <span class="detail-value" id="det-size">-</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">Duration</span>
+          <span class="detail-value" id="det-duration">-</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">Codec / Format</span>
+          <span class="detail-value" id="det-codec">-</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">Sample Rate</span>
+          <span class="detail-value" id="det-rate">-</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">Channels</span>
+          <span class="detail-value" id="det-channels">-</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">Bitrate</span>
+          <span class="detail-value" id="det-bitrate">-</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">Normalized</span>
+          <span class="detail-value" id="det-normalized">-</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">Integrated LUFS</span>
+          <span class="detail-value" id="det-lufs">-</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">True Peak</span>
+          <span class="detail-value" id="det-peak">-</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">Loudness Range</span>
+          <span class="detail-value" id="det-lra">-</span>
+        </div>
+      </div>
+    </div>
+    <footer class="modal-footer">
+      <button type="button" data-close-modal class="btn btn-primary">Tutup</button>
+    </footer>
+  </div>
+</dialog>
+
+<style>
+.audio-table .col-w-thumb {
+  width: 70px !important;
+}
+.audio-table th.col-w-actions,
+.audio-table td.actions {
+  text-align: right !important;
+}
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 1rem;
+}
+.detail-item {
+  background: var(--panel, #1e2230);
+  border: 1px solid var(--border, #2d313f);
+  border-radius: 8px;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.detail-label {
+  font-size: 0.8rem;
+  color: var(--muted, #8f9aa8);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.detail-value {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text, #ffffff);
+}
+</style>
+
 <script>
 (function() {
   // XHR upload with progress bar.
@@ -180,6 +360,15 @@
       };
       xhr.onload = () => {
         if (xhr.status >= 200 && xhr.status < 400) {
+          if (xhr.responseURL) {
+            try {
+              const resUrl = new URL(xhr.responseURL);
+              if (resUrl.searchParams.has('error')) {
+                window.location.href = resUrl.pathname + resUrl.search;
+                return;
+              }
+            } catch (e) {}
+          }
           window.location.href = '/audio?notice=Audio+uploaded';
         } else {
           submit.disabled = false;
@@ -205,6 +394,176 @@
     document.getElementById('rename-audio-form').action = '/audio/' + btn.dataset.audioId + '/rename';
     document.getElementById('rename-audio-title').value = btn.dataset.audioTitle || '';
   });
+
+  // Audio preview modal player
+  const previewDlg = document.getElementById('audio-preview');
+  if (previewDlg) {
+    const player = document.getElementById('preview-player');
+    const titleEl = document.getElementById('preview-title');
+    
+    document.addEventListener('modal:before-open', (e) => {
+      if (e.detail.id !== 'audio-preview') return;
+      const btn = e.detail.trigger;
+      if (!btn) return;
+      titleEl.textContent = btn.dataset.audioTitle || 'Preview Audio';
+      player.src = btn.dataset.audioSrc;
+      player.load();
+      player.play().catch(() => {});
+    });
+    
+    previewDlg.addEventListener('close', () => {
+      player.pause();
+      player.removeAttribute('src');
+      player.load();
+    });
+  }
+
+  // Polling for audio job detail modal
+  const jobDlg = document.getElementById('audio-job-detail');
+  if (jobDlg) {
+    const titleEl = document.getElementById('job-title');
+    const badgeEl = document.getElementById('job-badge');
+    const logEl = document.getElementById('job-log');
+    
+    let currentId = null;
+    let pollTimer = null;
+    let stickToBottom = true;
+    
+    async function poll() {
+      if (!currentId) return;
+      try {
+        const r = await fetch('/audio/' + currentId + '/status', { cache: 'no-store' });
+        if (!r.ok) return;
+        const d = await r.json();
+        
+        titleEl.textContent = d.title || 'Normalize Detail';
+        badgeEl.className = 'badge badge-' + (d.status === 'normalizing' ? 'idle' : d.status === 'error' ? 'error' : 'running');
+        badgeEl.textContent = d.percent != null ? 'normalizing (' + d.percent + '%)' : d.status;
+        
+        const cancelForm = document.getElementById('job-cancel-form');
+        if (cancelForm) {
+          if (d.status === 'normalizing') {
+            cancelForm.style.display = 'block';
+            cancelForm.action = '/audio/' + d.id + '/cancel';
+          } else {
+            cancelForm.style.display = 'none';
+          }
+        }
+        
+        if (d.log_tail != null && d.log_tail !== logEl.textContent) {
+          const nearBottom = stickToBottom;
+          logEl.textContent = d.log_tail || '(belum ada log)';
+          if (nearBottom) logEl.scrollTop = logEl.scrollHeight;
+        }
+        
+        if (d.status !== 'normalizing' && !jobDlg.dataset.reloadScheduled) {
+          jobDlg.dataset.reloadScheduled = '1';
+          setTimeout(() => { if (!jobDlg.open) window.location.reload(); }, 2500);
+        }
+      } catch (_) {}
+    }
+    
+    logEl.addEventListener('scroll', () => {
+      const delta = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight;
+      stickToBottom = delta < 20;
+    });
+    
+    document.addEventListener('modal:before-open', (e) => {
+      if (e.detail.id !== 'audio-job-detail') return;
+      const btn = e.detail.trigger;
+      currentId = btn ? Number(btn.dataset.audioId) : null;
+      titleEl.textContent = (btn && btn.dataset.audioTitle) || 'Normalize Detail';
+      badgeEl.textContent = 'loading';
+      badgeEl.className = 'badge badge-idle';
+      logEl.textContent = '(loading log…)';
+      stickToBottom = true;
+      delete jobDlg.dataset.reloadScheduled;
+      poll();
+      pollTimer = setInterval(poll, 1500);
+    });
+    
+    jobDlg.addEventListener('close', () => {
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+      currentId = null;
+    });
+  }
+
+  // Audio detail modal fetching
+  const detailDlg = document.getElementById('audio-detail');
+  if (detailDlg) {
+    function formatBytes(b) {
+      if (!b) return '0 B';
+      if (b < 1024) return b + ' B';
+      if (b < 1024*1024) return (b/1024).toFixed(1) + ' KB';
+      if (b < 1024*1024*1024) return (b/(1024*1024)).toFixed(1) + ' MB';
+      return (b/(1024*1024*1024)).toFixed(2) + ' GB';
+    }
+    function formatDuration(s) {
+      if (s == null || !Number.isFinite(s) || s < 0) return '-';
+      const m = Math.floor(s / 60), sec = Math.floor(s % 60);
+      return String(m).padStart(2, '0') + ':' + String(sec).padStart(2, '0');
+    }
+    
+    document.addEventListener('modal:before-open', async (e) => {
+      if (e.detail.id !== 'audio-detail') return;
+      const btn = e.detail.trigger;
+      if (!btn || !btn.dataset.audioId) return;
+      
+      const audioId = btn.dataset.audioId;
+      detailDlg.querySelector('#detail-title').textContent = btn.dataset.audioTitle || 'Detail Audio';
+      
+      // Set loading
+      detailDlg.querySelectorAll('.detail-value').forEach(el => el.textContent = 'Loading...');
+      
+      try {
+        const r = await fetch('/audio/' + audioId + '/metadata');
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const data = await r.json();
+        const t = data.track;
+        
+        detailDlg.querySelector('#det-size').textContent = formatBytes(t.size_bytes);
+        detailDlg.querySelector('#det-duration').textContent = t.duration_seconds ? `${formatDuration(t.duration_seconds)} (${Math.round(t.duration_seconds)}s)` : 'N/A';
+        detailDlg.querySelector('#det-codec').textContent = t.codec ? t.codec.toUpperCase() : 'N/A';
+        detailDlg.querySelector('#det-rate').textContent = t.sample_rate ? t.sample_rate + ' Hz' : 'N/A';
+        detailDlg.querySelector('#det-channels').textContent = t.channels === 1 ? 'Mono (1 ch)' : t.channels === 2 ? 'Stereo (2 ch)' : t.channels ? t.channels + ' ch' : 'N/A';
+        detailDlg.querySelector('#det-bitrate').textContent = t.bitrate ? Math.round(t.bitrate / 1000) + ' kbps' : 'N/A';
+        detailDlg.querySelector('#det-normalized').textContent = t.normalized ? 'Yes (✓)' : 'No (✗)';
+        detailDlg.querySelector('#det-lufs').textContent = t.integrated_lufs != null ? t.integrated_lufs.toFixed(2) + ' LUFS' : 'N/A';
+        detailDlg.querySelector('#det-peak').textContent = t.true_peak_db != null ? t.true_peak_db.toFixed(2) + ' dBFS' : 'N/A';
+        detailDlg.querySelector('#det-lra').textContent = t.loudness_range != null ? t.loudness_range.toFixed(2) + ' LU' : 'N/A';
+      } catch (err) {
+        detailDlg.querySelectorAll('.detail-value').forEach(el => el.textContent = 'Error');
+      }
+    });
+  }
+
+  // Inline polling for normalizing audio tracks
+  const normalizingNodes = document.querySelectorAll('[data-progress-badge-pct]');
+  if (normalizingNodes.length > 0) {
+    const ids = new Set();
+    normalizingNodes.forEach((n) => ids.add(n.dataset.progressBadgePct));
+    
+    async function pollOne(id) {
+      try {
+        const r = await fetch('/audio/' + id + '/status', { cache: 'no-store' });
+        if (!r.ok) return;
+        const d = await r.json();
+        if (d.status !== 'normalizing') {
+          window.location.reload();
+          return;
+        }
+        if (d.percent != null) {
+          document.querySelectorAll('[data-progress-badge-pct="' + id + '"]').forEach((el) => {
+            el.textContent = ' (' + d.percent + '%)';
+          });
+        }
+      } catch (_) {}
+    }
+    ids.forEach((id) => {
+      pollOne(id);
+      setInterval(() => pollOne(id), 2500);
+    });
+  }
 })();
 </script>
 

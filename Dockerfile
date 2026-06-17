@@ -11,7 +11,7 @@ RUN npm ci --omit=dev
 # ─── Stage 2: Production image ──────────────────────────────────────────────
 FROM node:20-alpine
 
-RUN apk add --no-cache ffmpeg
+RUN apk add --no-cache ffmpeg vnstat
 
 WORKDIR /app
 

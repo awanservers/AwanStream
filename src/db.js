@@ -195,6 +195,7 @@ function ensureSchema() {
   adda('true_peak_db', 'REAL', 'NULL');        // measured true peak (dBFS)
   adda('loudness_range', 'REAL', 'NULL');      // measured LRA (LU)
   adda('normalized', 'INTEGER NOT NULL', '0'); // 1 if file has been loudness-normalized
+  adda('status_log', 'TEXT', 'NULL');          // normalization log for real-time progress modal
 
   // Users migrations: track last successful login for the profile page.
   const ucols = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);

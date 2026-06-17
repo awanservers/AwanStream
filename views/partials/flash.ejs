@@ -1,14 +1,30 @@
 <% if (typeof error !== 'undefined' && error) { %>
-  <div class="alert alert-error" data-toast>
-    <span class="alert-icon">⚠</span>
-    <span class="alert-msg"><%= error %></span>
-    <button type="button" class="alert-close" onclick="this.parentElement.remove()" aria-label="Dismiss">×</button>
-  </div>
+  <script>
+    window.addEventListener('DOMContentLoaded', () => {
+      Swal.fire({
+        icon: 'error',
+        title: 'Gagal',
+        text: '<%= error %>',
+        confirmButtonColor: '#e5484d',
+        background: '#161b2c',
+        color: '#f0f3f8'
+      });
+    });
+  </script>
 <% } %>
 <% if (typeof notice !== 'undefined' && notice) { %>
-  <div class="alert alert-ok" data-toast>
-    <span class="alert-icon">✓</span>
-    <span class="alert-msg"><%= notice %></span>
-    <button type="button" class="alert-close" onclick="this.parentElement.remove()" aria-label="Dismiss">×</button>
-  </div>
+  <script>
+    window.addEventListener('DOMContentLoaded', () => {
+      Swal.fire({
+        icon: 'success',
+        title: 'Berhasil',
+        text: '<%= notice %>',
+        confirmButtonColor: '#4f8cff',
+        background: '#161b2c',
+        color: '#f0f3f8',
+        timer: 3000,
+        timerProgressBar: true
+      });
+    });
+  </script>
 <% } %>

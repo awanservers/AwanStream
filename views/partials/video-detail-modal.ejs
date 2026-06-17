@@ -1,0 +1,430 @@
+<dialog id="video-detail" class="modal modal-lg">
+  <div class="modal-card" style="max-height: 90vh; display: flex; flex-direction: column;">
+    <header class="modal-header">
+      <h2 id="detail-title">Detail Video</h2>
+      <button type="button" class="modal-close" data-close-modal aria-label="Close">×</button>
+    </header>
+
+    <div class="modal-body" style="flex: 1; overflow-y: auto; padding: 1.5rem;">
+      <!-- Tabs header -->
+      <div class="detail-tabs">
+        <button type="button" class="detail-tab-btn active" data-tab="summary">Ringkasan</button>
+        <button type="button" class="detail-tab-btn" data-tab="streams">Format &amp; Streams</button>
+        <button type="button" class="detail-tab-btn" data-tab="tags">Metadata &amp; Tags</button>
+      </div>
+
+      <!-- Tab 1: Summary -->
+      <div class="detail-tab-content active" id="tab-summary">
+        <div class="detail-grid">
+          <div class="detail-item">
+            <span class="detail-label">Resolusi</span>
+            <span class="detail-value" id="val-resolution">-</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Durasi</span>
+            <span class="detail-value" id="val-duration">-</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">FPS</span>
+            <span class="detail-value" id="val-fps">-</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Ukuran File</span>
+            <span class="detail-value" id="val-size">-</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Video Codec</span>
+            <span class="detail-value" id="val-video-codec">-</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Audio Codec</span>
+            <span class="detail-value" id="val-audio-codec">-</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Bitrate Rata-Rata</span>
+            <span class="detail-value" id="val-bitrate">-</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Keyframe / GOP</span>
+            <span class="detail-value" id="val-gop">-</span>
+          </div>
+        </div>
+
+        <div style="margin-top: 1.5rem;" id="readiness-card-container">
+          <!-- Stream readiness warning or success banner -->
+        </div>
+      </div>
+
+      <!-- Tab 2: Streams -->
+      <div class="detail-tab-content" id="tab-streams">
+        <div id="streams-list" class="streams-list-container">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+
+      <!-- Tab 3: Tags -->
+      <div class="detail-tab-content" id="tab-tags">
+        <div id="tags-container" class="tags-container">
+          <table class="table metadata-table" style="width: 100%; border-collapse: collapse;">
+            <thead>
+              <tr>
+                <th style="text-align: left; padding: 8px; border-bottom: 1px solid var(--border);">Properti</th>
+                <th style="text-align: left; padding: 8px; border-bottom: 1px solid var(--border);">Nilai</th>
+              </tr>
+            </thead>
+            <tbody id="tags-tbody">
+              <!-- Populated dynamically -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <footer class="modal-footer">
+      <button type="button" data-close-modal class="btn btn-primary">Tutup</button>
+    </footer>
+  </div>
+</dialog>
+
+<style>
+.detail-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border, #2d313f);
+  margin-bottom: 1.5rem;
+  gap: 0.5rem;
+}
+.detail-tab-btn {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--muted, #8f9aa8);
+  padding: 0.75rem 1rem;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  font-size: 0.95rem;
+}
+.detail-tab-btn:hover {
+  color: var(--text, #ffffff);
+}
+.detail-tab-btn.active {
+  color: var(--accent, #3b82f6);
+  border-bottom-color: var(--accent, #3b82f6);
+}
+.detail-tab-content {
+  display: none;
+}
+.detail-tab-content.active {
+  display: block;
+}
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 1rem;
+}
+.detail-item {
+  background: var(--panel, #1e2230);
+  border: 1px solid var(--border, #2d313f);
+  border-radius: 8px;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.detail-label {
+  font-size: 0.8rem;
+  color: var(--muted, #8f9aa8);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.detail-value {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text, #ffffff);
+}
+.stream-card {
+  background: var(--panel, #1e2230);
+  border: 1px solid var(--border, #2d313f);
+  border-radius: 8px;
+  padding: 1.25rem;
+  margin-bottom: 1rem;
+}
+.stream-header-badge {
+  display: inline-block;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-weight: bold;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  margin-bottom: 0.75rem;
+}
+.stream-header-badge.video {
+  background: rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.4);
+}
+.stream-header-badge.audio {
+  background: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.4);
+}
+.stream-header-badge.default {
+  background: rgba(100, 116, 139, 0.2);
+  color: #94a3b8;
+  border: 1px solid rgba(100, 116, 139, 0.4);
+}
+.stream-info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 0.75rem;
+}
+.metadata-table td {
+  padding: 0.75rem 0.5rem;
+  border-bottom: 1px solid var(--border, #2d313f);
+}
+</style>
+
+<script>
+(function() {
+  const dlg = document.getElementById('video-detail');
+  if (!dlg) return;
+
+  const tabBtns = dlg.querySelectorAll('.detail-tab-btn');
+  const tabContents = dlg.querySelectorAll('.detail-tab-content');
+
+  // Handle Tab switching
+  tabBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tabId = btn.dataset.tab;
+      tabBtns.forEach(b => b.classList.remove('active'));
+      tabContents.forEach(c => c.classList.remove('active'));
+      btn.classList.add('active');
+      dlg.querySelector('#tab-' + tabId).classList.add('active');
+    });
+  });
+
+  function resetTabs() {
+    tabBtns.forEach(b => b.classList.remove('active'));
+    tabContents.forEach(c => c.classList.remove('active'));
+    tabBtns[0].classList.add('active');
+    tabContents[0].classList.add('active');
+  }
+
+  function formatBytes(b) {
+    if (!b) return '0 B';
+    if (b < 1024) return b + ' B';
+    if (b < 1024*1024) return (b/1024).toFixed(1) + ' KB';
+    if (b < 1024*1024*1024) return (b/(1024*1024)).toFixed(1) + ' MB';
+    return (b/(1024*1024*1024)).toFixed(2) + ' GB';
+  }
+
+  function formatDuration(s) {
+    if (s == null || !Number.isFinite(s) || s < 0) return '-';
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = Math.floor(s % 60);
+    return (h ? String(h).padStart(2, '0') + ':' : '') +
+      String(m).padStart(2, '0') + ':' + String(sec).padStart(2, '0');
+  }
+
+  document.addEventListener('modal:before-open', async (e) => {
+    if (e.detail.id !== 'video-detail') return;
+    const btn = e.detail.trigger;
+    if (!btn || !btn.dataset.videoId) return;
+
+    resetTabs();
+
+    const videoId = btn.dataset.videoId;
+    const titleEl = dlg.querySelector('#detail-title');
+    titleEl.textContent = btn.dataset.videoTitle || 'Detail Video';
+
+    // Show loading state
+    dlg.querySelector('#val-resolution').textContent = 'Loading...';
+    dlg.querySelector('#val-duration').textContent = 'Loading...';
+    dlg.querySelector('#val-fps').textContent = 'Loading...';
+    dlg.querySelector('#val-size').textContent = 'Loading...';
+    dlg.querySelector('#val-video-codec').textContent = 'Loading...';
+    dlg.querySelector('#val-audio-codec').textContent = 'Loading...';
+    dlg.querySelector('#val-bitrate').textContent = 'Loading...';
+    dlg.querySelector('#val-gop').textContent = 'Loading...';
+    dlg.querySelector('#streams-list').innerHTML = '<div class="muted small" style="padding: 1rem;">Loading streams info...</div>';
+    dlg.querySelector('#tags-tbody').innerHTML = '<tr><td colspan="2" class="muted small" style="text-align: center;">Loading metadata tags...</td></tr>';
+    dlg.querySelector('#readiness-card-container').innerHTML = '';
+
+    try {
+      const res = await fetch('/videos/' + videoId + '/metadata');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+
+      const { video, probe, gopSeconds } = data;
+
+      // Populate Summary
+      const width = video.src_width || (probe && probe.streams && probe.streams.find(s => s.codec_type === 'video')?.width) || null;
+      const height = video.src_height || (probe && probe.streams && probe.streams.find(s => s.codec_type === 'video')?.height) || null;
+      dlg.querySelector('#val-resolution').textContent = width && height ? `${width} × ${height}` : 'N/A';
+
+      const duration = video.duration_seconds || (probe && probe.format && parseFloat(probe.format.duration)) || null;
+      dlg.querySelector('#val-duration').textContent = duration ? `${formatDuration(duration)} (${Math.round(duration)}s)` : 'N/A';
+
+      dlg.querySelector('#val-fps').textContent = video.src_fps ? video.src_fps + ' fps' : 'N/A';
+      dlg.querySelector('#val-size').textContent = formatBytes(video.size_bytes);
+
+      // Find codecs and bitrates from probe
+      let vCodec = 'N/A';
+      let aCodec = 'none';
+      let vBitrate = null;
+
+      if (probe && probe.streams) {
+        probe.streams.forEach(s => {
+          if (s.codec_type === 'video') {
+            vCodec = s.codec_name;
+            if (s.profile) vCodec += ` (${s.profile})`;
+            if (s.bit_rate) vBitrate = Math.round(parseInt(s.bit_rate) / 1000);
+          } else if (s.codec_type === 'audio') {
+            aCodec = s.codec_name;
+            if (s.sample_rate) aCodec += ` (${Math.round(parseInt(s.sample_rate)/100)/10} kHz)`;
+          }
+        });
+      }
+
+      // Fallback from db
+      if (vCodec === 'N/A' && video.status === 'ready') vCodec = 'h264';
+      if (aCodec === 'none' && video.has_audio) aCodec = 'aac';
+      if (!vBitrate && video.video_bitrate_kbps) vBitrate = video.video_bitrate_kbps;
+
+      dlg.querySelector('#val-video-codec').textContent = vCodec;
+      dlg.querySelector('#val-audio-codec').textContent = aCodec;
+      dlg.querySelector('#val-bitrate').textContent = vBitrate ? vBitrate + ' kbps' : 'N/A';
+
+      // GOP
+      dlg.querySelector('#val-gop').textContent = gopSeconds != null ? gopSeconds + 's' : 'N/A';
+
+      // Stream Readiness Assessment
+      let readinessHTML = '';
+      const isH264 = vCodec.toLowerCase().includes('h264');
+      const isAac = aCodec.toLowerCase().includes('aac') || aCodec === 'none';
+      const isGopOk = gopSeconds != null && gopSeconds <= 2.5;
+      
+      const issues = [];
+      if (!isH264) issues.push(`Codec video saat ini adalah "${vCodec}", disarankan H.264.`);
+      if (!isAac) issues.push(`Codec audio saat ini adalah "${aCodec}", disarankan AAC.`);
+      if (!isGopOk) {
+        issues.push(gopSeconds != null 
+          ? `Interval Keyframe (GOP) adalah ${gopSeconds}s (disarankan ≤ 2.5s).`
+          : 'Interval Keyframe (GOP) tidak terdeteksi atau tidak beraturan.');
+      }
+
+      if (issues.length === 0) {
+        readinessHTML = `
+          <div class="alert alert-info" style="margin: 0; background: rgba(16, 185, 129, 0.1); border-left: 4px solid #10b981; color: #34d399; border-radius: 6px; padding: 0.75rem 1rem;">
+            <strong>✓ Stream Ready:</strong> Video ini siap untuk di-streaming tanpa re-encode.
+          </div>`;
+      } else if (video.status === 'ready') {
+        readinessHTML = `
+          <div class="alert alert-warning" style="margin: 0; background: rgba(245, 158, 11, 0.1); border-left: 4px solid #f59e0b; color: #fbbf24; border-radius: 6px; padding: 0.75rem 1rem;">
+            <strong style="display: block; margin-bottom: 0.25rem;">⚠ Siap Stream (Suboptimal):</strong>
+            <div style="font-size: 0.9rem; margin-bottom: 0.5rem;">Video ini ditandai siap stream, namun memiliki parameter suboptimal:</div>
+            <ul style="margin: 0; padding-left: 1.25rem; font-size: 0.9rem;">
+              ${issues.map(iss => `<li>${iss}</li>`).join('')}
+            </ul>
+          </div>`;
+        readinessHTML = `
+          <div class="alert alert-warning" style="margin: 0; background: rgba(245, 158, 11, 0.1); border-left: 4px solid #f59e0b; color: #fbbf24; border-radius: 6px; padding: 0.75rem 1rem;">
+            <strong style="display: block; margin-bottom: 0.25rem;">⚠ Butuh Prepare / Transcode:</strong>
+            <ul style="margin: 0; padding-left: 1.25rem; font-size: 0.9rem;">
+              ${issues.map(iss => `<li>${iss}</li>`).join('')}
+            </ul>
+            <div style="margin-top: 0.5rem; font-size: 0.85rem; opacity: 0.9;">
+              Gunakan tombol <strong>Prepare</strong> di perpustakaan video untuk mengonversinya secara otomatis.
+            </div>
+          </div>`;
+      }
+      dlg.querySelector('#readiness-card-container').innerHTML = readinessHTML;
+
+      // Populate Streams List
+      let streamsHTML = '';
+      if (probe && probe.streams && probe.streams.length > 0) {
+        probe.streams.forEach((s, idx) => {
+          const type = s.codec_type;
+          const badgeClass = type === 'video' ? 'video' : (type === 'audio' ? 'audio' : 'default');
+          
+          let detailsHTML = '';
+          if (type === 'video') {
+            detailsHTML = `
+              <div><strong>Codec:</strong> ${s.codec_name} (${s.codec_long_name || ''})</div>
+              <div><strong>Profile / Level:</strong> ${s.profile || 'N/A'} / ${s.level || 'N/A'}</div>
+              <div><strong>Resolusi:</strong> ${s.width}x${s.height} [SAR ${s.sample_aspect_ratio || '1:1'} DAR ${s.display_aspect_ratio || '1:1'}]</div>
+              <div><strong>FPS:</strong> ${s.r_frame_rate || 'N/A'}</div>
+              <div><strong>Pixel Format:</strong> ${s.pix_fmt || 'N/A'}</div>
+              <div><strong>Color Range:</strong> ${s.color_range || 'N/A'} · Space: ${s.color_space || 'N/A'}</div>
+            `;
+          } else if (type === 'audio') {
+            detailsHTML = `
+              <div><strong>Codec:</strong> ${s.codec_name} (${s.codec_long_name || ''})</div>
+              <div><strong>Sample Rate:</strong> ${s.sample_rate} Hz</div>
+              <div><strong>Channel Layout:</strong> ${s.channel_layout || 'N/A'} (${s.channels} channels)</div>
+              <div><strong>Sample Format:</strong> ${s.sample_fmt || 'N/A'}</div>
+              <div><strong>Bitrate:</strong> ${s.bit_rate ? Math.round(parseInt(s.bit_rate)/1000) + ' kbps' : 'N/A'}</div>
+            `;
+          } else {
+            detailsHTML = `
+              <div><strong>Type:</strong> ${type}</div>
+              <div><strong>Codec:</strong> ${s.codec_name}</div>
+            `;
+          }
+
+          streamsHTML += `
+            <div class="stream-card" style="margin-bottom: 1rem;">
+              <span class="stream-header-badge ${badgeClass}">${type.toUpperCase()} STREAM #${idx}</span>
+              <div class="stream-info-grid small muted" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 0.5rem; font-size: 0.9rem;">
+                ${detailsHTML}
+              </div>
+            </div>
+          `;
+        });
+      } else {
+        streamsHTML = '<div class="muted small" style="padding: 1rem;">Format stream data tidak tersedia.</div>';
+      }
+      dlg.querySelector('#streams-list').innerHTML = streamsHTML;
+
+      // Populate Format & Tags
+      let tagsHTML = '';
+      if (probe && probe.format) {
+        const fmt = probe.format;
+        tagsHTML += `
+          <tr><td><strong>Format Name</strong></td><td>${fmt.format_name} (${fmt.format_long_name || ''})</td></tr>
+          <tr><td><strong>Duration</strong></td><td>${fmt.duration} s</td></tr>
+          <tr><td><strong>Size</strong></td><td>${formatBytes(parseInt(fmt.size))} (${fmt.size} bytes)</td></tr>
+          <tr><td><strong>Total Bitrate</strong></td><td>${fmt.bit_rate ? Math.round(parseInt(fmt.bit_rate)/1000) + ' kbps' : 'N/A'}</td></tr>
+        `;
+        
+        if (fmt.tags) {
+          Object.keys(fmt.tags).forEach(tag => {
+            tagsHTML += `
+              <tr>
+                <td><code style="background: rgba(255,255,255,0.05); padding: 0.1rem 0.3rem; border-radius: 3px;">${tag}</code></td>
+                <td style="word-break: break-all;">${fmt.tags[tag]}</td>
+              </tr>
+            `;
+          });
+        }
+      } else {
+        // Fallback to DB info
+        tagsHTML = `
+          <tr><td><strong>Title</strong></td><td>${video.title}</td></tr>
+          <tr><td><strong>Filename</strong></td><td>${video.filename}</td></tr>
+          <tr><td><strong>Size</strong></td><td>${formatBytes(video.size_bytes)}</td></tr>
+          <tr><td><strong>Duration</strong></td><td>${video.duration_seconds ? video.duration_seconds + ' s' : 'N/A'}</td></tr>
+          <tr><td><strong>Status</strong></td><td>${video.status}</td></tr>
+        `;
+      }
+      dlg.querySelector('#tags-tbody').innerHTML = tagsHTML;
+
+    } catch (err) {
+      console.error(err);
+      dlg.querySelector('#readiness-card-container').innerHTML = `
+        <div class="alert alert-error" style="margin: 0;">
+          Gagal memuat metadata video: ${err.message}
+        </div>`;
+    }
+  });
+})();
+</script>

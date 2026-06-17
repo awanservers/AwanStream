@@ -76,6 +76,9 @@
                       data-stream-preset="<%= s.preset || 'veryfast' %>"
                       data-stream-audio-id="<%= s.audio_id || '' %>"
                       data-stream-audio-volume="<%= s.audio_volume || '0.3' %>"
+                      data-stream-scheduled="<%= s.next_start_at ? '1' : '0' %>"
+                      data-stream-start-at="<%= s.next_start_at ? formatUTCToLocalInput(s.next_start_at) : '' %>"
+                      data-stream-stop-at="<%= s.next_stop_at ? formatUTCToLocalInput(s.next_stop_at) : '' %>"
                       title="Edit">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
               </button>
@@ -262,18 +265,25 @@
 <dialog id="edit-stream" class="modal modal-xl">
   <div class="modal-card">
     <header class="modal-header">
-      <h2>Edit stream</h2>
+      <h2>Edit stream — Single Video</h2>
       <button type="button" class="modal-close" data-close-modal aria-label="Close">×</button>
     </header>
     <form method="POST" id="edit-stream-form">
       <input type="hidden" name="re_encode" id="edit-re-encode" value="0">
+      <div class="modal-tabs">
+        <button type="button" class="tab active" data-tab="edit-single-stream-tab">Stream</button>
+        <button type="button" class="tab" data-tab="edit-single-schedule-tab">Schedule</button>
+        <button type="button" class="tab" data-tab="edit-single-audio-tab">Audio</button>
+      </div>
       <div class="modal-body">
-        <div class="grid-2">
+        <div id="edit-single-stream-tab" class="tab-panel active">
+          <div class="stream-create-layout">
+            <div class="stream-create-fields">
           <label>Name <input name="name" id="edit-stream-name" required></label>
           <label>Video
             <select name="video_id" id="edit-stream-video" required>
               <% videos.forEach(v => { %>
-                <option value="<%= v.id %>"><%= v.title %></option>
+                <option value="<%= v.id %>" data-thumb="<%= v.thumbnail ? '/videos/' + v.id + '/thumb' : '' %>"><%= v.title %></option>
               <% }) %>
             </select>
           </label>
@@ -284,6 +294,13 @@
               <% }) %>
             </select>
           </label>
+        </div>
+        <div class="stream-video-preview" id="edit-single-video-preview">
+          <img id="edit-single-video-thumb" alt="" loading="lazy" style="display:none">
+          <div class="stream-video-preview-empty" id="edit-single-video-empty">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="14" height="14" rx="2"/><path d="M22 7l-6 5 6 5V7z"/></svg>
+          </div>
+        </div>
           <label>RTMP URL <input name="rtmp_url" id="edit-stream-rtmp" required></label>
           <label class="full">Stream key
             <div class="input-with-toggle">
@@ -298,6 +315,21 @@
             <input type="checkbox" name="loop_video" value="1" id="edit-stream-loop">
             Loop video terus-menerus
           </label>
+        </div>
+      </div>
+      <div id="edit-single-schedule-tab" class="tab-panel">
+        <div class="grid-2">
+          <label class="full inline-check">
+            <input type="checkbox" name="schedule_enabled" value="1" id="edit-stream-schedule-enabled" data-schedule-toggle="edit-single">
+            Jadwalkan stream ini
+          </label>
+          <label>Start at <input type="datetime-local" name="start_at" id="edit-stream-start-at" data-schedule-field="edit-single" disabled></label>
+          <label>Stop at <input type="datetime-local" name="stop_at" id="edit-stream-stop-at" data-schedule-field="edit-single" disabled></label>
+          <div class="full small muted">Timezone: <%= streamTzLabel %></div>
+        </div>
+      </div>
+      <div id="edit-single-audio-tab" class="tab-panel">
+        <div class="grid-2">
           <label class="full">Audio overlay <span class="muted small">(opsional)</span>
             <select name="audio_id" id="edit-stream-audio-id">
               <option value="">— Tanpa audio overlay —</option>
@@ -311,6 +343,7 @@
           </label>
         </div>
       </div>
+    </div>
       <footer class="modal-footer">
         <button type="button" class="btn" data-close-modal>Batal</button>
         <button type="submit" class="btn btn-primary">Save</button>
@@ -328,6 +361,53 @@
       if (u) rtmpInput.value = u;
     });
   }
+
+  const videoSelect = document.getElementById('edit-stream-video');
+  const videoThumb = document.getElementById('edit-single-video-thumb');
+  const videoEmpty = document.getElementById('edit-single-video-empty');
+  function syncVideoPreview() {
+    if (!videoSelect || !videoThumb || !videoEmpty) return;
+    const opt = videoSelect.options[videoSelect.selectedIndex];
+    const thumb = opt ? opt.dataset.thumb : '';
+    if (thumb) {
+      videoThumb.src = thumb;
+      videoThumb.style.display = '';
+      videoEmpty.style.display = 'none';
+    } else {
+      videoThumb.removeAttribute('src');
+      videoThumb.style.display = 'none';
+      videoEmpty.style.display = 'flex';
+    }
+  }
+  if (videoSelect) {
+    videoSelect.addEventListener('change', syncVideoPreview);
+  }
+
+  const modal = document.getElementById('edit-stream');
+  if (modal) {
+    modal.querySelectorAll('.modal-tabs .tab').forEach((tab) => {
+      tab.addEventListener('click', () => {
+        const target = tab.dataset.tab;
+        modal.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+        modal.querySelectorAll('.modal-tabs .tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        const panel = document.getElementById(target);
+        if (panel) panel.classList.add('active');
+      });
+    });
+  }
+
+  const scheduleToggle = document.getElementById('edit-stream-schedule-enabled');
+  const scheduleFields = document.querySelectorAll('[data-schedule-field="edit-single"]');
+  function syncScheduleFields() {
+    scheduleFields.forEach((field) => {
+      field.disabled = !scheduleToggle.checked;
+      if (!scheduleToggle.checked) field.value = '';
+    });
+  }
+  if (scheduleToggle) {
+    scheduleToggle.addEventListener('change', syncScheduleFields);
+  }
   document.addEventListener('modal:before-open', (e) => {
     if (e.detail.id !== 'edit-stream') return;
     const btn = e.detail.trigger;
@@ -335,6 +415,7 @@
     document.getElementById('edit-stream-form').action = '/streams/' + btn.dataset.streamId + '/edit';
     document.getElementById('edit-stream-name').value = btn.dataset.streamName || '';
     document.getElementById('edit-stream-video').value = btn.dataset.streamVideoId || '';
+    syncVideoPreview();
     document.getElementById('edit-stream-platform').value = btn.dataset.streamPlatform || 'custom';
     document.getElementById('edit-stream-rtmp').value = btn.dataset.streamRtmpUrl || '';
     const keyInput = document.getElementById('edit-stream-key');
@@ -351,6 +432,20 @@
     document.getElementById('edit-re-encode').value = btn.dataset.streamReEncode || '0';
     document.getElementById('edit-stream-audio-id').value = btn.dataset.streamAudioId || '';
     document.getElementById('edit-stream-audio-volume').value = btn.dataset.streamAudioVolume || '0.3';
+    const isScheduled = btn.dataset.streamScheduled === '1';
+    scheduleToggle.checked = isScheduled;
+    document.getElementById('edit-stream-start-at').value = btn.dataset.streamStartAt || '';
+    document.getElementById('edit-stream-stop-at').value = btn.dataset.streamStopAt || '';
+    syncScheduleFields();
+
+    if (modal) {
+      modal.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+      modal.querySelectorAll('.modal-tabs .tab').forEach(t => t.classList.remove('active'));
+      const defaultTab = modal.querySelector('.modal-tabs .tab[data-tab="edit-single-stream-tab"]');
+      if (defaultTab) defaultTab.classList.add('active');
+      const defaultPanel = document.getElementById('edit-single-stream-tab');
+      if (defaultPanel) defaultPanel.classList.add('active');
+    }
   });
 })();
 </script>

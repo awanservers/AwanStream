@@ -271,12 +271,12 @@ Dokumentasi per-fitur AwanStream. Untuk setiap fitur: apa fungsinya, cara pakain
 
 **Cara pakai:**
 1. Buka `/looper` (sidebar: Loop)
-2. Pilih video sumber + target durasi (preset 30m/1h/.../24h atau Custom menit)
+2. Pilih video sumber (harus berstatus `ready`) + target durasi (preset Custom, 30 menit, 1 jam, 3 jam, atau 10 jam)
 3. Pilih mode: **Smooth** (default, recommended) atau **Fast**
 4. (Optional) Audio overlay — pilih audio track + mode (Mix/Replace) + volume
 5. Klik **Start loop**
 6. Progress bar + ETA + phase label di tabel "Active jobs"
-7. Setelah selesai, video baru muncul di `/videos` Library dengan status `ready`
+7. Setelah selesai, video baru muncul di daftar video hasil loop di halaman `/looper` (terpisah dari Library Utama)
 
 ### Smooth vs Fast mode
 
@@ -318,7 +318,7 @@ Output: video 10 jam, ~20-25 GB, siap upload ke YouTube
 ```
 
 **Endpoints:**
-- `GET /looper` — form + active jobs + recent errors
+- `GET /looper` — list video hasil loop + form modal + active jobs + recent errors
 - `POST /looper/start` — start job
 - `GET /looper/progress` — JSON polling
 - `POST /looper/:jobId/cancel` — abort

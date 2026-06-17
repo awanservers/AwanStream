@@ -12,6 +12,49 @@ if (!fs.existsSync(audioDir)) fs.mkdirSync(audioDir, { recursive: true });
 const logsDir = path.join(__dirname, '..', 'logs');
 if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
 
+// activeJobs map for tracking progress percentage of loudness normalization.
+// Key: audioId (number) -> Value: { percent: number }
+const activeJobs = new Map();
+
+function getActiveJob(id) {
+  return activeJobs.get(Number(id)) || null;
+}
+
+/**
+ * Assess how stream-ready an audio file is.
+ *
+ * Levels:
+ *   'ready'           - Normalized (-14 LUFS) AND codec is AAC (100% standard).
+ *   'ok'              - Normalized but codec is NOT AAC (e.g. MP3/Opus). Works, but transcode is needed / suboptimal.
+ *   'needs-normalize' - Not normalized (normalized = 0).
+ */
+function assessStreamReadiness(track) {
+  if (!track) return { level: 'unknown', reasons: ['data tidak tersedia'] };
+
+  const reasons = [];
+  let level = 'ready';
+
+  // 1. Loudness normalization check
+  if (!track.normalized) {
+    level = 'needs-normalize';
+    reasons.push('Loudness belum dinormalisasi ke standar -14 LUFS');
+  } else {
+    reasons.push(`Loudness ok: ${track.integrated_lufs ? track.integrated_lufs.toFixed(1) : '-14'} LUFS`);
+  }
+
+  // 2. Codec check
+  if (track.codec && track.codec.toLowerCase() !== 'aac') {
+    if (level === 'ready') {
+      level = 'ok'; // Normalized but suboptimal codec
+    }
+    reasons.push(`Codec "${track.codec.toUpperCase()}" (Disarankan AAC untuk live streaming tanpa transcode audio)`);
+  } else {
+    reasons.push('Codec AAC (standar streaming)');
+  }
+
+  return { level, reasons };
+}
+
 // Loudness normalization defaults — YouTube standard.
 const LOUDNESS_TARGET = {
   I: -14,    // integrated loudness (LUFS)
@@ -34,119 +77,164 @@ function isSupportedFilename(filename) {
  * Returns measurement object on success, null on failure.
  *   { input_i, input_tp, input_lra, input_thresh, target_offset }
  */
-function analyzeLoudness(filePath) {
-  const args = [
-    '-hide_banner', '-nostats',
-    '-i', filePath,
-    '-af', `loudnorm=I=${LOUDNESS_TARGET.I}:TP=${LOUDNESS_TARGET.TP}:LRA=${LOUDNESS_TARGET.LRA}:print_format=json`,
-    '-f', 'null', '-',
-  ];
-  const r = spawnSync('ffmpeg', args, { encoding: 'utf8', timeout: 5 * 60 * 1000 });
-  if (r.status !== 0) return null;
+function analyzeLoudness(filePath, onProgress) {
+  return new Promise((resolve) => {
+    const args = [
+      '-hide_banner', '-nostats',
+      '-progress', 'pipe:1',
+      '-i', filePath,
+      '-af', `loudnorm=I=${LOUDNESS_TARGET.I}:TP=${LOUDNESS_TARGET.TP}:LRA=${LOUDNESS_TARGET.LRA}:print_format=json`,
+      '-f', 'null', '-',
+    ];
+    const child = spawn('ffmpeg', args);
+    let stderr = '';
+    child.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
 
-  // FFmpeg prints the JSON block at the end of stderr. Find it.
-  const stderr = String(r.stderr || '');
-  const start = stderr.lastIndexOf('{');
-  const end = stderr.lastIndexOf('}');
-  if (start === -1 || end === -1 || end <= start) return null;
+    let stdoutBuf = '';
+    child.stdout.on('data', (chunk) => {
+      stdoutBuf += chunk.toString('utf8');
+      let idx;
+      while ((idx = stdoutBuf.indexOf('\n')) !== -1) {
+        const line = stdoutBuf.slice(0, idx).trim();
+        stdoutBuf = stdoutBuf.slice(idx + 1);
+        const eq = line.indexOf('=');
+        if (eq === -1) continue;
+        const k = line.slice(0, eq);
+        const v = line.slice(eq + 1);
+        if (k === 'out_time_ms') {
+          const ms = Number(v);
+          if (Number.isFinite(ms) && ms > 0) {
+            const time = ms / 1_000_000;
+            if (onProgress) onProgress(time);
+          }
+        }
+      }
+    });
 
-  try {
-    const json = JSON.parse(stderr.slice(start, end + 1));
-    return {
-      input_i: parseFloat(json.input_i),
-      input_tp: parseFloat(json.input_tp),
-      input_lra: parseFloat(json.input_lra),
-      input_thresh: parseFloat(json.input_thresh),
-      target_offset: parseFloat(json.target_offset),
-    };
-  } catch (_) {
-    return null;
-  }
+    child.on('close', (code) => {
+      if (code !== 0) return resolve(null);
+
+      // FFmpeg prints the JSON block at the end of stderr. Find it.
+      const start = stderr.lastIndexOf('{');
+      const end = stderr.lastIndexOf('}');
+      if (start === -1 || end === -1 || end <= start) return resolve(null);
+
+      try {
+        const json = JSON.parse(stderr.slice(start, end + 1));
+        resolve({
+          input_i: parseFloat(json.input_i),
+          input_tp: parseFloat(json.input_tp),
+          input_lra: parseFloat(json.input_lra),
+          input_thresh: parseFloat(json.input_thresh),
+          target_offset: parseFloat(json.target_offset),
+        });
+      } catch (_) {
+        resolve(null);
+      }
+    });
+    child.on('error', () => {
+      resolve(null);
+    });
+  });
 }
 
 /**
  * Pass 2 of two-pass loudness normalization: apply with measured values.
  * Re-encodes the audio file to the input file path (overwrites). Returns
  * true on success, false on failure.
- *
- * Output codec is preserved when possible:
- *   - .mp3   → libmp3lame
- *   - .m4a/.aac → aac
- *   - .ogg/.opus → libopus
- *   - .wav/.flac → flac (lossless)
- *   - else → aac (safe fallback)
  */
-function applyLoudnessNormalization(filePath, measured) {
-  const ext = path.extname(filePath).toLowerCase();
-  let outCodec, outExt;
-  switch (ext) {
-    case '.mp3':           outCodec = 'libmp3lame'; outExt = '.mp3'; break;
-    case '.m4a': case '.aac': outCodec = 'aac';     outExt = ext;    break;
-    case '.opus': case '.ogg': outCodec = 'libopus'; outExt = ext;   break;
-    case '.flac': case '.wav': outCodec = 'flac';   outExt = '.flac'; break;
-    default:               outCodec = 'aac';        outExt = '.m4a'; break;
-  }
+function applyLoudnessNormalization(filePath, measured, onProgress) {
+  return new Promise((resolve) => {
+    // Force the standard streaming audio codec (AAC) for all normalized files
+    const outCodec = 'aac';
+    const outExt = '.m4a';
+    const tmpPath = filePath + '.norm-tmp' + outExt;
 
-  const tmpPath = filePath + '.norm-tmp' + outExt;
+    const af = [
+      'loudnorm',
+      `I=${LOUDNESS_TARGET.I}`,
+      `TP=${LOUDNESS_TARGET.TP}`,
+      `LRA=${LOUDNESS_TARGET.LRA}`,
+      `measured_I=${measured.input_i}`,
+      `measured_TP=${measured.input_tp}`,
+      `measured_LRA=${measured.input_lra}`,
+      `measured_thresh=${measured.input_thresh}`,
+      `offset=${measured.target_offset}`,
+      'print_format=summary',
+    ];
+    const afStr = af[0] + '=' + af.slice(1).join(':') + ',alimiter=limit=-1.5dB:level=disabled';
 
-  const af = [
-    'loudnorm',
-    `I=${LOUDNESS_TARGET.I}`,
-    `TP=${LOUDNESS_TARGET.TP}`,
-    `LRA=${LOUDNESS_TARGET.LRA}`,
-    `measured_I=${measured.input_i}`,
-    `measured_TP=${measured.input_tp}`,
-    `measured_LRA=${measured.input_lra}`,
-    `measured_thresh=${measured.input_thresh}`,
-    `offset=${measured.target_offset}`,
-    // Note: we deliberately don't use linear=true. While linear is slightly
-    // more accurate, it requires measured values to fall within strict bounds
-    // and rejects otherwise. Dynamic mode (the default) handles edge cases
-    // better and is already very accurate for two-pass normalization.
-    'print_format=summary',
-  ];
-  // FFmpeg filter syntax: filtername=key=value:key=value (= after name, : between params)
-  // Chain alimiter after loudnorm as brick-wall safety against peaks that
-  // loudnorm's internal limiter might miss.
-  const afStr = af[0] + '=' + af.slice(1).join(':') + ',alimiter=limit=-1.5dB:level=disabled';
+    const args = [
+      '-hide_banner', '-nostats', '-y',
+      '-progress', 'pipe:1',
+      '-i', filePath,
+      '-vn',           // drop any video stream (MP3 album art etc.) — audio only
+      '-map', '0:a',   // explicitly map only audio stream
+      '-af', afStr,
+      '-c:a', outCodec,
+      '-ar', '48000',  // resample to 48k for consistency (loudnorm requires 192k internally anyway)
+      tmpPath,
+    ];
 
-  const args = [
-    '-hide_banner', '-nostats', '-y',
-    '-i', filePath,
-    '-vn',           // drop any video stream (MP3 album art etc.) — audio only
-    '-map', '0:a',   // explicitly map only audio stream
-    '-af', afStr,
-    '-c:a', outCodec,
-    '-ar', '48000',  // resample to 48k for consistency (loudnorm requires 192k internally anyway)
-    tmpPath,
-  ];
+    const child = spawn('ffmpeg', args);
+    let stderr = '';
+    child.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
 
-  const r = spawnSync('ffmpeg', args, { encoding: 'utf8', timeout: 10 * 60 * 1000 });
-  if (r.status !== 0) {
-    // Log the actual ffmpeg error to disk so we can diagnose next time.
-    try {
-      const errLog = path.join(logsDir, 'audio-normalize.log');
-      const stderrTail = String(r.stderr || '').split('\n').slice(-30).join('\n');
-      fs.appendFileSync(errLog,
-        `[${new Date().toISOString()}]   pass 2 ffmpeg failed (exit ${r.status})\n` +
-        `=== stderr tail ===\n${stderrTail}\n=== end ===\n`
-      );
-    } catch (_) {}
-    if (fs.existsSync(tmpPath)) try { fs.unlinkSync(tmpPath); } catch (_) {}
-    return false;
-  }
+    let stdoutBuf = '';
+    child.stdout.on('data', (chunk) => {
+      stdoutBuf += chunk.toString('utf8');
+      let idx;
+      while ((idx = stdoutBuf.indexOf('\n')) !== -1) {
+        const line = stdoutBuf.slice(0, idx).trim();
+        stdoutBuf = stdoutBuf.slice(idx + 1);
+        const eq = line.indexOf('=');
+        if (eq === -1) continue;
+        const k = line.slice(0, eq);
+        const v = line.slice(eq + 1);
+        if (k === 'out_time_ms') {
+          const ms = Number(v);
+          if (Number.isFinite(ms) && ms > 0) {
+            const time = ms / 1_000_000;
+            if (onProgress) onProgress(time);
+          }
+        }
+      }
+    });
 
-  // Replace original with normalized version. If extension changed (e.g. .wav → .flac),
-  // we keep the original filename but the actual content is the new format. This is
-  // a minor inconsistency we accept — alternative is to track new filename in DB.
-  try {
-    fs.unlinkSync(filePath);
-    fs.renameSync(tmpPath, filePath);
-    return true;
-  } catch (e) {
-    if (fs.existsSync(tmpPath)) try { fs.unlinkSync(tmpPath); } catch (_) {}
-    return false;
-  }
+    child.on('close', (code) => {
+      if (code !== 0) {
+        try {
+          const errLog = path.join(logsDir, 'audio-normalize.log');
+          const stderrTail = stderr.split('\n').slice(-30).join('\n');
+          fs.appendFileSync(errLog,
+            `[${new Date().toISOString()}]   pass 2 ffmpeg failed (exit ${code})\n` +
+            `=== stderr tail ===\n${stderrTail}\n=== end ===\n`
+          );
+        } catch (_) {}
+        if (fs.existsSync(tmpPath)) try { fs.unlinkSync(tmpPath); } catch (_) {}
+        return resolve(false);
+      }
+
+      // Replace original with normalized version. If extension changed (e.g. .wav → .flac),
+      // we keep the original filename but the actual content is the new format.
+      try {
+        fs.unlinkSync(filePath);
+        fs.renameSync(tmpPath, filePath);
+        resolve(true);
+      } catch (e) {
+        if (fs.existsSync(tmpPath)) try { fs.unlinkSync(tmpPath); } catch (_) {}
+        resolve(false);
+      }
+    });
+    child.on('error', () => {
+      if (fs.existsSync(tmpPath)) try { fs.unlinkSync(tmpPath); } catch (_) {}
+      resolve(false);
+    });
+  });
 }
 
 /**
@@ -238,58 +326,31 @@ function register({ title, filename, size }) {
     VALUES (?, ?, ?, 'uploaded')`).run(finalTitle, filename, size || 0);
   const id = Number(result.lastInsertRowid);
 
-  // Probe + normalize in background so response isn't blocked.
+  // Probe in background so response isn't blocked.
   setImmediate(() => {
     try {
       const filePath = path.join(audioDir, filename);
       const info = probe(filePath);
       if (!info.codec && !info.duration) {
-        // Probe found no audio stream — mark as error, skip normalization.
+        // Probe found no audio stream — mark as error.
         db.prepare(`UPDATE audio_tracks SET status='error', last_error=?
           WHERE id=?`).run('No audio stream detected (file may be corrupt or unsupported)', id);
         return;
       }
 
-      // Persist initial probe metadata first so user sees something while normalize runs.
-      db.prepare(`UPDATE audio_tracks
-        SET duration_seconds=?, codec=?, bitrate=?, sample_rate=?, channels=?
+      // Persist initial probe metadata first.
+      db.prepare(`UPDATE audio_tracks SET
+        duration_seconds=?,
+        codec=?,
+        bitrate=?,
+        sample_rate=?,
+        channels=?,
+        status='uploaded',
+        normalized=0,
+        last_error=NULL,
+        status_log='[Uploaded] Metadata probed successfully.'
         WHERE id=?`).run(
         info.duration, info.codec, info.bitrate, info.sampleRate, info.channels, id
-      );
-
-      // Normalize loudness (two-pass, EBU R128 → -14 LUFS).
-      // This is destructive: overwrites the file in place.
-      const result = normalize(filePath);
-      if (!result.ok) {
-        // Soft fail: keep file as-is, mark normalized=0, log error.
-        // Track is still usable, just not loudness-consistent.
-        db.prepare(`UPDATE audio_tracks
-          SET last_error=?, normalized=0
-          WHERE id=?`).run('Loudness normalization failed: ' + result.error, id);
-        return;
-      }
-
-      // Re-probe the normalized file to refresh size + bitrate (codec may have changed).
-      const newInfo = probe(filePath);
-      const stat = fs.statSync(filePath);
-
-      db.prepare(`UPDATE audio_tracks SET
-        size_bytes=?,
-        codec=COALESCE(?, codec),
-        bitrate=COALESCE(?, bitrate),
-        sample_rate=COALESCE(?, sample_rate),
-        integrated_lufs=?,
-        true_peak_db=?,
-        loudness_range=?,
-        normalized=1,
-        last_error=NULL
-        WHERE id=?`).run(
-        stat.size,
-        newInfo.codec, newInfo.bitrate, newInfo.sampleRate,
-        result.measured.input_i,
-        result.measured.input_tp,
-        result.measured.input_lra,
-        id,
       );
     } catch (e) {
       db.prepare(`UPDATE audio_tracks SET status='error', last_error=?
@@ -359,9 +420,24 @@ function get(audioId) {
   return db.prepare('SELECT * FROM audio_tracks WHERE id=?').get(Number(audioId));
 }
 
+function cancel(id) {
+  const job = activeJobs.get(Number(id));
+  if (!job) return false;
+  job.cancelled = true;
+  if (job.process) {
+    try {
+      job.process.kill('SIGTERM');
+    } catch (_) {}
+  }
+  return true;
+}
+
 function reconcileOnBoot() {
-  // Nothing to reconcile right now — upload is synchronous (no stale jobs).
-  // Future: if we add download-from-URL for audio, reset 'downloading' here.
+  // Reset any audio stuck in 'normalizing' status to 'uploaded' on boot,
+  // since background jobs would have been terminated if the process was killed.
+  try {
+    db.prepare("UPDATE audio_tracks SET status='uploaded' WHERE status='normalizing'").run();
+  } catch (_) {}
 }
 
 module.exports = {
@@ -379,4 +455,8 @@ module.exports = {
   analyzeLoudness,
   applyLoudnessNormalization,
   LOUDNESS_TARGET,
+  activeJobs,
+  getActiveJob,
+  cancel,
+  assessStreamReadiness,
 };

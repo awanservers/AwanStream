@@ -2,289 +2,803 @@
   title: 'Loop',
   activeNav: 'looper',
   pageTitle: 'Loop Video',
-  pageSubtitle: 'Perpanjang clip pendek jadi video panjang (1-24 jam) untuk 24/7 livestream.',
+  pageSubtitle: 'Perpanjang clip pendek jadi video panjang untuk 24/7 livestream.',
+  topbarActions: `
+    <button type="button" class="btn btn-primary" data-open-modal="create-loop">+ Create new loop</button>
+  `,
 }) %>
 <%- include('partials/flash', { error, notice }) %>
 
-<% if (videos.length === 0) { %>
+<style>
+/* Custom Looper styles */
+#create-loop .tab-panel {
+  padding: 1.5rem 1.25rem;
+  min-height: 380px;
+}
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.spin {
+  animation: spin 2s linear infinite;
+}
+.loop-field-row {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+.loop-slider-control {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+}
+.loop-slider-control .slider-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+.loop-slider-control input[type="range"] {
+  flex: 1;
+  padding: 0;
+  height: 6px;
+  background: var(--border);
+  border: none;
+  border-radius: 3px;
+  outline: none;
+  cursor: pointer;
+}
+.loop-slider-control label {
+  display: flex;
+  justify-content: space-between;
+  font-weight: 500;
+  color: var(--text);
+  font-size: 0.9rem;
+}
+.loop-slider-control .slider-max {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+</style>
+
+<% if (loopedVideos.length === 0) { %>
   <div class="card empty">
-    <p class="muted">Belum ada video dengan durasi terdeteksi.</p>
-    <p class="muted small">Upload clip dulu di <a href="/videos">Library</a>. Setelah upload, durasi otomatis di-probe dan video akan muncul di sini.</p>
+    <p class="muted">Belum ada video hasil loop.</p>
+    <button type="button" class="btn btn-primary" data-open-modal="create-loop">+ Buat loop pertama</button>
   </div>
 <% } else { %>
-  <div class="loop-builder">
-    <form method="POST" action="/looper/start" id="loop-form">
-      <div class="loop-builder-grid">
-        <div class="loop-main">
-          <div class="loop-field">
-            <label for="source_video_id">Video sumber</label>
-            <select name="source_video_id" id="source_video_id" required>
-              <option value="">Pilih video...</option>
-              <% videos.forEach(v => {
-                   const dur = Math.round(v.duration_seconds || 0);
-                   const durLabel = dur >= 60 ? Math.floor(dur/60) + 'm ' + (dur%60) + 's' : dur + 's';
-                   const sizeLabel = v.size_bytes ? (v.size_bytes / (1024*1024)).toFixed(1) + ' MB' : '';
-                   const resLabel = v.src_width && v.src_height ? v.src_width + 'x' + v.src_height : '';
-                   const meta = [durLabel, resLabel, sizeLabel].filter(Boolean).join(' - ');
-              %>
-                <option value="<%= v.id %>"
-                        data-duration="<%= v.duration_seconds %>"
-                        data-thumb="<%= v.thumbnail ? '/videos/' + v.id + '/thumb' : '' %>"
-                        data-title="<%= v.title %>"
-                        data-meta="<%= meta %>">
-                  <%= v.title %> - <%= meta %>
-                </option>
-              <% }) %>
-            </select>
-          </div>
-
-          <div class="loop-field">
-            <div class="loop-field-head">
-              <label>Target durasi</label>
-              <span class="small muted">30 menit - 24 jam</span>
-            </div>
-            <div class="preset-grid">
-              <% presets.forEach((p, idx) => { %>
-                <label class="preset-chip">
-                  <input type="radio" name="target_preset" value="<%= p.key %>"
-                         <%= idx === 2 ? 'checked' : '' %>>
-                  <span><%= p.label %></span>
-                </label>
-              <% }) %>
-              <label class="preset-chip">
-                <input type="radio" name="target_preset" value="custom">
-                <span>Custom</span>
-              </label>
-            </div>
-            <div class="loop-inline-row" id="custom-duration-row" style="display:none;">
-              <input type="number" name="custom_minutes" id="custom_minutes"
-                     min="1" max="1440" step="1" placeholder="Menit">
-              <span class="small muted">menit</span>
-            </div>
-          </div>
-
-          <div class="loop-field">
-            <label for="title">Title output <span class="muted small">(opsional)</span></label>
-            <input type="text" name="title" id="title"
-                   placeholder="Kosongkan untuk auto-generate">
-          </div>
-        </div>
-
-        <aside class="loop-side">
-          <div class="loop-source-preview">
-            <img id="loop-source-thumb" alt="" loading="lazy" style="display:none;">
-            <div class="loop-source-empty" id="loop-source-empty">Preview video</div>
-          </div>
-          <div class="loop-source-info">
-            <strong id="loop-source-title"></strong>
-            <span class="small muted" id="loop-source-meta"></span>
-          </div>
-          <div id="estimate-row" style="display:none;">
-            <div class="alert alert-info" id="estimate-box"></div>
-          </div>
-        </aside>
-
-        <div class="loop-options-grid">
-          <div class="loop-option-panel">
-            <label class="loop-toggle">
-              <input type="checkbox" name="smooth" id="smooth" checked>
-              <span>
-                <strong>Smooth mode</strong>
-                <span class="small muted">Crossfade di boundary loop supaya transisi lebih halus.</span>
-              </span>
-            </label>
-            <div class="loop-range" id="crossfade-control">
-              <div class="loop-range-head">
-                <span class="small muted">Crossfade</span>
-                <strong><span id="crossfade-value">1.5</span>s</strong>
+  <div class="table-wrap card card-flush">
+    <table class="table videos-table">
+      <thead><tr>
+        <th class="col-w-thumb"></th>
+        <th class="col-w-title">Title</th>
+        <th class="col-w-status">Status</th>
+        <th class="col-w-actions">Actions</th>
+      </tr></thead>
+      <tbody>
+        <% loopedVideos.forEach(v => { %>
+          <tr>
+            <td class="col-thumb">
+              <% if (v.thumbnail) { %>
+                <button type="button" class="video-thumb-btn"
+                        data-open-modal="video-preview"
+                        data-video-id="<%= v.id %>"
+                        data-video-src="/videos/<%= v.id %>/file"
+                        data-video-title="<%= v.title %>"
+                        data-video-info="<%= v.src_width && v.src_height ? v.src_width + '×' + v.src_height : '' %><%= v.size_bytes ? ' · ' + (v.size_bytes / (1024*1024)).toFixed(1) + ' MB' : '' %><%= v.duration_seconds ? ' · ' + Math.floor(v.duration_seconds/60) + 'm ' + Math.floor(v.duration_seconds%60) + 's' : '' %>"
+                        title="Preview video">
+                  <img src="/videos/<%= v.id %>/thumb" alt="" class="video-thumb" loading="lazy">
+                  <span class="video-thumb-play">▶</span>
+                </button>
+              <% } else { %>
+                <form method="POST" action="/videos/<%= v.id %>/regen-thumb" class="inline" title="Generate thumbnail">
+                  <button type="submit" class="video-thumb video-thumb-empty">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="14" height="14" rx="2"/><path d="M22 7l-6 5 6 5V7z"/></svg>
+                  </button>
+                </form>
+              <% } %>
+            </td>
+            <td class="video-title-cell">
+              <div class="video-title" title="<%= v.title %>"><%= v.title %></div>
+              <div class="video-meta small muted">
+                <%= (v.size_bytes / (1024*1024)).toFixed(1) %> MB
+                · <%= formatTime(v.created_at) %>
+                <% if (v.duration_seconds) { %>
+                  <% const dur = Math.round(v.duration_seconds); %>
+                  <% const h = Math.floor(dur / 3600); %>
+                  <% const m = Math.floor((dur % 3600) / 60); %>
+                  <% const s = dur % 60; %>
+                  · <%= h > 0 ? h + 'h ' + m + 'm' : m + 'm ' + s + 's' %>
+                <% } %>
+                <% if (v.src_width && v.src_height) { %>
+                  · <%= v.src_width %>×<%= v.src_height %>
+                <% } %>
               </div>
-              <input type="range" name="crossfade_seconds" id="crossfade_seconds"
-                     min="0.5" max="3.0" step="0.1" value="1.5">
-              <div class="loop-range-scale small muted">
-                <span>0.5s</span>
-                <span>1.5s</span>
-                <span>3.0s</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="loop-option-panel">
-            <div class="loop-panel-title">Audio overlay <span class="muted small">(opsional)</span></div>
-            <div class="loop-audio-grid">
-              <label>Audio track
-                <select name="audio_id" id="audio_id">
-                  <option value="">Tanpa audio overlay</option>
-                  <% if (typeof audioTracks !== 'undefined' && audioTracks.length > 0) { %>
-                    <% audioTracks.forEach(a => { %>
-                      <option value="<%= a.id %>"><%= a.title %><% if (a.duration_seconds) { %> - <%= Math.floor(a.duration_seconds/60) %>m <%= Math.round(a.duration_seconds%60) %>s<% } %></option>
-                    <% }) %>
+            </td>
+            <td>
+              <% if (v.status === 'ready') { %>
+                <span class="badge badge-running">ready</span>
+              <% } else if (v.status === 'transcoding') { %>
+                <span class="badge badge-idle">looping…</span>
+              <% } else if (v.status === 'error') { %>
+                <span class="badge badge-error" title="<%= v.last_error || 'Error' %>">error</span>
+              <% } else { %>
+                <span class="badge badge-idle"><%= v.status %></span>
+              <% } %>
+            </td>
+            <td class="actions">
+              <button type="button" class="btn-icon"
+                      data-open-modal="edit-video"
+                      data-video-id="<%= v.id %>"
+                      data-video-title="<%= v.title %>"
+                      data-folder-id="<%= v.folder_id || '' %>"
+                      title="Edit">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+              </button>
+              <a href="/videos/<%= v.id %>/download" class="btn-icon" title="Download" download>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              </a>
+              <button type="button" class="btn-icon"
+                      data-open-modal="video-detail"
+                      data-video-id="<%= v.id %>"
+                      data-video-title="<%= v.title %>"
+                      title="Detail Video">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+              </button>
+              <% if (v.loop_job_id) { %>
+                <button type="button" class="btn-icon" 
+                        style="color: <%= v.status === 'error' ? 'var(--danger)' : (v.status === 'transcoding' ? 'var(--primary)' : 'var(--muted)') %>;"
+                        onclick="openLoopLog('<%= v.loop_job_id %>')"
+                        title="Lihat Log Proses">
+                  <% if (v.status === 'transcoding') { %>
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="spin">
+                      <polyline points="23 4 23 10 17 10"></polyline>
+                      <polyline points="1 20 1 14 7 14"></polyline>
+                      <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                    </svg>
                   <% } else { %>
-                    <option value="" disabled>Belum ada audio. Upload di /audio dulu.</option>
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                      <polyline points="14 2 14 8 20 8"></polyline>
+                      <line x1="16" y1="13" x2="8" y2="13"></line>
+                      <line x1="16" y1="17" x2="8" y2="17"></line>
+                      <polyline points="10 9 9 9 8 9"></polyline>
+                    </svg>
                   <% } %>
-                </select>
-              </label>
-              <label>Mode
-                <select name="audio_mode" id="audio_mode">
-                  <option value="mix" selected>Mix</option>
-                  <option value="replace">Replace</option>
-                </select>
-              </label>
-              <label>Volume
-                <input type="number" name="audio_volume" value="0.3" min="0" max="1" step="0.1">
-              </label>
-            </div>
-          </div>
+                </button>
+              <% } %>
+              <% if (v.status === 'ready') { %>
+                <% if (v.youtube_status === 'uploading' || v.youtube_status === 'pending') { %>
+                  <button type="button" class="btn-icon"
+                          title="Uploading to YouTube — <%= v.youtube_percent || 0 %>% — klik untuk lihat detail"
+                          data-yt-watch-job="<%= v.youtube_job_id %>"
+                          data-yt-watch-video="<%= v.id %>"
+                          data-yt-resume-job="<%= v.youtube_job_id %>"
+                          data-video-title="<%= v.title %>"
+                          style="color:var(--accent);">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+                    <span class="yt-pct" style="font-size:10px;font-weight:600;margin-left:2px;"><%= v.youtube_percent || 0 %>%</span>
+                  </button>
+                <% } else if (v.youtube_video_id) { %>
+                  <a href="https://studio.youtube.com/video/<%= v.youtube_video_id %>/edit"
+                     target="_blank" rel="noopener"
+                     class="btn-icon" style="color:#22c55e;"
+                     title="Uploaded — open in YouTube Studio">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+                  </a>
+                <% } else if (v.youtube_interrupted && youtubeConnected) { %>
+                  <button type="button" class="btn-icon"
+                          data-open-modal="upload-youtube"
+                          data-video-id="<%= v.id %>"
+                          data-video-title="<%= v.title %>"
+                          title="Upload was interrupted by server restart — click to retry from start"
+                          style="color:#f59e0b;">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                  </button>
+                <% } else if (youtubeConnected) { %>
+                  <button type="button" class="btn-icon"
+                          data-open-modal="upload-youtube"
+                          data-video-id="<%= v.id %>"
+                          data-video-title="<%= v.title %>"
+                          title="Upload to YouTube">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+                  </button>
+                <% } %>
+              <% } %>
+              <form method="POST" action="/videos/<%= v.id %>/delete" class="inline"
+                    data-confirm="Hapus video hasil loop '<%= v.title %>'? File di disk akan ikut terhapus."
+                    data-confirm-title="Hapus video"
+                    data-confirm-action="Hapus">
+                <input type="hidden" name="back" value="/looper<%= typeof page !== 'undefined' && page > 1 ? '?page=' + page : '' %>">
+                <button class="btn-icon btn-icon-danger" type="submit" title="Delete">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+                </button>
+              </form>
+            </td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+
+  <% if (typeof totalPages !== 'undefined' && totalPages > 1) {
+       const baseUrl = '/looper?';
+       const pageUrl = (n) => baseUrl + 'page=' + n;
+       const windowSize = 2;
+       const pages = [];
+       for (let i = 1; i <= totalPages; i++) {
+         if (i === 1 || i === totalPages || (i >= page - windowSize && i <= page + windowSize)) {
+           pages.push(i);
+         } else if (pages[pages.length - 1] !== '...') {
+           pages.push('...');
+         }
+       }
+  %>
+    <div class="pagination">
+      <span class="small muted">Showing <%= (page - 1) * perPage + 1 %>–<%= Math.min(page * perPage, totalCount) %> of <%= totalCount %></span>
+      <div class="pagination-buttons">
+        <% if (page > 1) { %>
+          <a href="<%= pageUrl(page - 1) %>" class="btn btn-sm">← Prev</a>
+        <% } else { %>
+          <span class="btn btn-sm btn-disabled">← Prev</span>
+        <% } %>
+        <% pages.forEach(p => { %>
+          <% if (p === '...') { %>
+            <span class="page-ellipsis">…</span>
+          <% } else if (p === page) { %>
+            <span class="btn btn-sm btn-primary btn-disabled"><%= p %></span>
+          <% } else { %>
+            <a href="<%= pageUrl(p) %>" class="btn btn-sm"><%= p %></a>
+          <% } %>
+        <% }); %>
+        <% if (page < totalPages) { %>
+          <a href="<%= pageUrl(page + 1) %>" class="btn btn-sm">Next →</a>
+        <% } else { %>
+          <span class="btn btn-sm btn-disabled">Next →</span>
+        <% } %>
+      </div>
+    </div>
+  <% } %>
+<% } %>
+
+
+
+<!-- Create Loop Form Modal -->
+<dialog id="create-loop" class="modal modal-xl">
+  <div class="modal-card">
+    <header class="modal-header">
+      <h2>Create New Loop</h2>
+      <button type="button" class="modal-close" data-close-modal aria-label="Close">×</button>
+    </header>
+    <% if (videos.length === 0) { %>
+      <div class="modal-body">
+        <div class="card empty" style="margin:0;">
+          <p class="muted">Belum ada video dengan status ready di library.</p>
+          <p class="muted small">Silakan jalankan <strong>Prepare</strong> terlebih dahulu di <a href="/videos">Library</a> agar video bisa diloop.</p>
+        </div>
+      </div>
+      <footer class="modal-footer">
+        <button type="button" class="btn" data-close-modal>Tutup</button>
+      </footer>
+    <% } else { %>
+      <form method="POST" action="/looper/start" id="loop-form">
+        <!-- Tabs Header -->
+        <div class="modal-tabs">
+          <button type="button" class="tab active" data-tab="loop-tab-video">Video</button>
+          <button type="button" class="tab" data-tab="loop-tab-transition">Transition</button>
+          <button type="button" class="tab" data-tab="loop-tab-audio">Audio</button>
         </div>
 
-        <div class="alert alert-error" id="loop-form-error" style="display:none;"></div>
-      </div>
+        <div class="modal-body" style="padding-top: 0.5rem;">
+          <!-- Tab 1: Video -->
+          <div id="loop-tab-video" class="tab-panel active">
+            <div class="loop-builder-grid" style="padding: 0.5rem 0 1.25rem;">
+              <div class="loop-main">
+                <div class="loop-field">
+                  <label for="source_video_id">Video sumber</label>
+                  <select name="source_video_id" id="source_video_id" required>
+                    <option value="">Pilih video...</option>
+                    <% videos.forEach(v => {
+                         const dur = Math.round(v.duration_seconds || 0);
+                         const durLabel = dur >= 60 ? Math.floor(dur/60) + 'm ' + (dur%60) + 's' : dur + 's';
+                         const sizeLabel = v.size_bytes ? (v.size_bytes / (1024*1024)).toFixed(1) + ' MB' : '';
+                         const resLabel = v.src_width && v.src_height ? v.src_width + 'x' + v.src_height : '';
+                         const meta = [durLabel, resLabel, sizeLabel].filter(Boolean).join(' - ');
+                    %>
+                      <option value="<%= v.id %>"
+                              data-duration="<%= v.duration_seconds %>"
+                              data-thumb="<%= v.thumbnail ? '/videos/' + v.id + '/thumb' : '' %>"
+                              data-title="<%= v.title %>"
+                              data-meta="<%= meta %>">
+                        <%= v.title %> - <%= meta %>
+                      </option>
+                    <% }) %>
+                  </select>
+                </div>
 
-      <footer class="loop-builder-footer">
-        <a href="/videos" class="btn">Cancel</a>
-        <button type="submit" class="btn btn-primary">Start loop</button>
+                <!-- Loop Options (Preset Duration) -->
+                <div class="loop-option-panel">
+                  <div class="loop-panel-title">Target durasi</div>
+                  <div class="loop-preset-chips">
+                    <!-- First option: Custom -->
+                    <label class="preset-chip">
+                      <input type="radio" name="target_preset" value="custom" checked>
+                      <span>Custom</span>
+                    </label>
+                    <% presets.forEach(p => { %>
+                      <label class="preset-chip">
+                        <input type="radio" name="target_preset" value="<%= p.key %>" data-seconds="<%= p.seconds %>">
+                        <span><%= p.label %></span>
+                      </label>
+                    <% }) %>
+                  </div>
+
+                  <!-- Custom minutes input (active by default now since custom is first) -->
+                  <div id="custom-duration-row" class="custom-duration-box" style="margin-top: 12px;">
+                    <label for="custom_minutes">Durasi custom (menit)</label>
+                    <input type="number" name="custom_minutes" id="custom_minutes" min="1" step="1" value="30">
+                  </div>
+                </div>
+
+                <!-- Output video title (optional) -->
+                <div class="loop-field" style="margin-top: 16px;">
+                  <label for="loop_title">Title video hasil loop <span class="muted small">(opsional)</span></label>
+                  <input type="text" name="title" id="loop_title" placeholder="Pakai nama default jika kosong">
+                </div>
+              </div>
+
+              <div class="loop-sidebar" style="max-width: 320px; width: 100%; justify-self: center; align-self: center;">
+                <div class="loop-source-preview">
+                  <img id="loop-source-thumb" src="" alt="Source video thumbnail preview" style="display:none;">
+                  <div id="loop-source-empty" class="loop-source-empty" style="flex-direction: column; gap: 8px;">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg>
+                    <span style="font-size: 0.85rem;">Preview Thumbnail</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tab 2: Transition (Advanced settings) -->
+          <div id="loop-tab-transition" class="tab-panel">
+            <div class="loop-field-row">
+              <div class="loop-panel-title">Pengaturan transisi</div>
+              
+              <label class="inline-check" style="display: flex; cursor: pointer; margin-top: 0.5rem;">
+                <input type="checkbox" name="smooth" id="smooth" checked value="1">
+                <span>Smooth mode (seamless crossfade transisi)</span>
+              </label>
+
+              <div id="crossfade-control" class="loop-slider-control">
+                <label for="crossfade_seconds">
+                  <span>Durasi crossfade</span>
+                  <span style="color: var(--primary); font-weight: 600;"><span id="crossfade-value">1.5</span> detik</span>
+                </label>
+                <div class="slider-row">
+                  <span style="font-size: 0.85rem; color: var(--muted);">0.3s</span>
+                  <input type="range" name="crossfade_seconds" id="crossfade_seconds" min="0.3" max="3.0" step="0.1" value="1.5">
+                  <span class="slider-max">3.0s</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tab 3: Audio (Audio overlay) -->
+          <div id="loop-tab-audio" class="tab-panel">
+            <div class="loop-field-row">
+              <div class="loop-panel-title">Audio overlay (opsional)</div>
+              
+              <div class="loop-audio-grid" style="margin-top: 0.5rem;">
+                <label>
+                  <span>Audio track</span>
+                  <select name="audio_id" id="audio_id">
+                    <option value="">Tanpa audio overlay</option>
+                    <% if (typeof audioTracks !== 'undefined' && audioTracks.length > 0) { %>
+                      <% audioTracks.forEach(a => { %>
+                        <option value="<%= a.id %>"><%= a.title %><% if (a.duration_seconds) { %> - <%= Math.floor(a.duration_seconds/60) %>m <%= Math.round(a.duration_seconds%60) %>s<% } %></option>
+                      <% }) %>
+                    <% } else { %>
+                      <option value="" disabled>Belum ada audio. Upload di /audio dulu.</option>
+                    <% } %>
+                  </select>
+                </label>
+                <label>
+                  <span>Mode</span>
+                  <select name="audio_mode" id="audio_mode">
+                    <option value="mix" selected>Mix</option>
+                    <option value="replace">Replace</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Volume</span>
+                  <input type="number" name="audio_volume" value="0.3" min="0" max="1" step="0.1">
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div class="alert alert-error" id="loop-form-error" style="display:none; margin-top: 16px;"></div>
+        </div>
+        <footer class="modal-footer">
+          <button type="button" class="btn" data-close-modal>Batal</button>
+          <button type="submit" class="btn btn-primary">Start loop</button>
+        </footer>
+      </form>
+    <% } %>
+  </div>
+</dialog>
+
+<!-- Loop Job Detail Modal (Monitoring & Log) -->
+<dialog id="loop-job-detail" class="modal modal-lg">
+  <div class="modal-card">
+    <header class="modal-header">
+      <h2 id="loop-job-title">Loop Job Detail</h2>
+      <button type="button" class="modal-close" data-close-modal aria-label="Close">×</button>
+    </header>
+    <div class="modal-body">
+      <div class="job-status" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem;">
+        <span class="badge" id="loop-job-badge" style="text-transform: uppercase;">loading</span>
+        <span class="small muted" id="loop-job-eta-top"></span>
+      </div>
+      <div class="progress progress-lg" style="margin-bottom: 1rem;">
+        <div class="progress-bar" id="loop-job-bar" style="width:0%"></div>
+        <div class="progress-label" id="loop-job-label">starting…</div>
+      </div>
+      <div class="job-stats" id="loop-job-stats" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; background: rgba(255, 255, 255, 0.02); padding: 1rem; border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 1.25rem;">
+        <div style="display: flex; flex-direction: column;"><span class="muted small" style="text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">Elapsed</span> <strong id="loop-job-time">-</strong></div>
+        <div style="display: flex; flex-direction: column;"><span class="muted small" style="text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">Speed</span> <strong id="loop-job-speed">-</strong></div>
+        <div style="display: flex; flex-direction: column;"><span class="muted small" style="text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">Phase</span> <strong id="loop-job-phase">-</strong></div>
+        <div style="display: flex; flex-direction: column;"><span class="muted small" style="text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">ETA</span> <strong id="loop-job-eta">-</strong></div>
+      </div>
+      <h3 class="log-heading" style="font-size: 0.95rem; font-weight: 600; margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted);">FFmpeg log <span class="small muted">(last 100 lines)</span></h3>
+      <pre class="log-box" id="loop-job-log" style="background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem; font-family: monospace; font-size: 0.8rem; color: var(--text); overflow: auto; max-height: 250px; white-space: pre-wrap; word-break: break-all; margin: 0;"></pre>
+    </div>
+    <footer class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+      <div>
+        <form method="POST" id="loop-job-cancel-form" class="inline" style="display:none">
+          <button class="btn btn-danger" type="submit">Cancel loop job</button>
+        </form>
+      </div>
+      <div style="display: flex; gap: 0.5rem;">
+        <button type="button" id="loop-job-copy-btn" class="btn">Copy Log</button>
+        <button type="button" data-close-modal class="btn btn-primary">Tutup</button>
+      </div>
+    </footer>
+  </div>
+</dialog>
+
+<!-- Video preview player modal -->
+<dialog id="video-preview" class="modal modal-lg">
+  <div class="modal-card">
+    <header class="modal-header">
+      <h2 id="preview-title">Preview</h2>
+      <button type="button" class="modal-close" data-close-modal aria-label="Close">×</button>
+    </header>
+    <div class="modal-body" style="padding:0;background:#000;border-radius:0 0 12px 12px">
+      <video id="preview-player" controls preload="metadata" style="width:100%;max-height:65vh;display:block">
+        Your browser does not support the video tag.
+      </video>
+      <div id="preview-info" class="small muted" style="padding:0.6rem 1rem;background:var(--panel)"></div>
+      <div id="preview-error" class="alert alert-error" style="display:none;margin:1rem">
+        Format video ini tidak didukung browser. Jalankan <strong>Prepare</strong> dulu untuk convert ke H.264 MP4.
+      </div>
+    </div>
+    <footer class="modal-footer" style="justify-content:space-between;flex-wrap:wrap;gap:0.5rem">
+      <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap">
+        <span class="small muted" id="preview-thumb-status"></span>
+      </div>
+      <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
+        <button type="button" class="btn" id="preview-capture-thumb" title="Gunakan frame saat ini sebagai thumbnail">
+          📸 Set thumbnail from current frame
+        </button>
+        <a href="#" class="btn" id="preview-download-thumb" target="_blank" download>
+          ⬇ Download thumbnail
+        </a>
+        <button type="button" class="btn" data-close-modal>Close</button>
+      </div>
+    </footer>
+  </div>
+</dialog>
+
+<!-- Edit video modal -->
+<dialog id="edit-video" class="modal modal-sm">
+  <div class="modal-card">
+    <header class="modal-header">
+      <h2>Edit video</h2>
+      <button type="button" class="modal-close" data-close-modal aria-label="Close">×</button>
+    </header>
+    <form method="POST" id="edit-video-form">
+      <div class="modal-body">
+        <label>Title <input name="title" id="edit-video-title" required></label>
+        <label>Folder
+          <select name="folder_id" id="edit-video-folder">
+            <option value="">(No folder)</option>
+            <% if (typeof folders !== 'undefined') { folders.forEach(f => { %>
+              <option value="<%= f.id %>"><%= f.name %></option>
+            <% }); } %>
+          </select>
+        </label>
+        <input type="hidden" name="back" value="/looper<%= typeof page !== 'undefined' && page > 1 ? '?page=' + page : '' %>">
+      </div>
+      <footer class="modal-footer">
+        <button type="button" class="btn" data-close-modal>Batal</button>
+        <button type="submit" class="btn btn-primary">Save</button>
       </footer>
     </form>
   </div>
-<% } %>
+</dialog>
 
-<h2 style="margin-top:28px; margin-bottom:12px;">Active jobs</h2>
-<div id="active-jobs-wrap">
-  <% if (activeJobs.length === 0) { %>
-    <div class="card empty">
-      <p class="muted">Tidak ada loop job yang sedang berjalan.</p>
-    </div>
-  <% } else { %>
-    <div class="table-wrap card card-flush">
-      <table class="table" id="jobs-table">
-        <thead><tr>
-          <th>Job</th>
-          <th>Source → Output</th>
-          <th>Target</th>
-          <th>Phase</th>
-          <th>Progress</th>
-          <th>Speed</th>
-          <th>ETA</th>
-          <th>Actions</th>
-        </tr></thead>
-        <tbody>
-          <% activeJobs.forEach(j => { %>
-            <tr data-job-id="<%= j.jobId %>">
-              <td>#<%= j.jobId %><div class="small muted"><%= j.mode %></div></td>
-              <td class="small">
-                <%= j.sourceTitle %><br>
-                <span class="muted">→ <%= j.outputTitle %></span>
-              </td>
-              <td class="small">
-                <% const t = j.target; %>
-                <%= t >= 3600 ? (t/3600).toFixed(t%3600===0?0:1) + 'h' : Math.round(t/60) + 'm' %>
-              </td>
-              <td class="small job-phase">
-                <%= j.progress.phaseLabel || '-' %>
-              </td>
-              <td>
-                <div class="progress">
-                  <div class="progress-bar" style="width: <%= j.progress.percent || 0 %>%;"></div>
-                </div>
-                <span class="small muted job-percent"><%= j.progress.percent || 0 %>%</span>
-              </td>
-              <td class="small job-speed"><%= j.progress.speed ? j.progress.speed.toFixed(1) + 'x' : '-' %></td>
-              <td class="small job-eta">-</td>
-              <td>
-                <form method="POST" action="/looper/<%= j.jobId %>/cancel" class="inline"
-                      data-confirm="Cancel loop job ini? Video output yang belum selesai akan dihapus."
-                      data-confirm-title="Cancel loop"
-                      data-confirm-action="Cancel job">
-                  <button type="submit" class="btn btn-danger">Cancel</button>
-                </form>
-                <button type="button" class="btn btn-icon" title="View Log"
-                        onclick="openLoopLog('<%= j.jobId %>')">📄</button>
-              </td>
-            </tr>
-          <% }) %>
-        </tbody>
-      </table>
-    </div>
-  <% } %>
-</div>
+<!-- YouTube Upload Modal -->
+<dialog id="upload-youtube" class="modal">
+  <div class="modal-card">
+    <header class="modal-header">
+      <h2>Upload to YouTube</h2>
+      <button type="button" class="modal-close" data-close-modal aria-label="Close">×</button>
+    </header>
+    <form id="upload-youtube-form" method="POST">
+      <div class="modal-body">
+        <p class="muted small" style="margin-top:0;">
+          Video di-upload sebagai <strong>Unlisted</strong> by default — kamu bisa edit metadata (title, description, tags, thumbnail) dan publish manual lewat YouTube Studio setelah selesai.
+        </p>
+        <p class="muted small" style="margin:0 0 10px; padding:8px 10px; background:rgba(245,158,11,0.1); border-left:3px solid #f59e0b; border-radius:4px;">
+          ⚠ <strong>Note:</strong> Kalau server restart saat upload berlangsung, kamu harus mulai ulang dari awal (resume across restart belum di-support). Untuk file besar, pastikan VPS / koneksi stabil.
+        </p>
+        <div class="grid-2">
+          <label class="full">Title
+            <input type="text" name="title" id="yt-upload-title" required maxlength="100">
+            <span class="small muted">Max 100 karakter. Default pakai title video di Library.</span>
+          </label>
+          <label class="full">Privacy
+            <select name="privacy" id="yt-upload-privacy">
+              <option value="unlisted" selected>Unlisted (rekomendasi — bisa diakses via link, tidak muncul di search)</option>
+              <option value="private">Private (hanya kamu yang bisa lihat)</option>
+              <option value="public">Public (langsung publish — pastikan title & thumbnail sudah final)</option>
+            </select>
+          </label>
+          <label>Category
+            <select name="category_id" id="yt-upload-category">
+              <option value="10" selected>Music</option>
+              <option value="22">People &amp; Blogs</option>
+              <option value="24">Entertainment</option>
+              <option value="20">Gaming</option>
+              <option value="27">Education</option>
+              <option value="28">Science &amp; Technology</option>
+            </select>
+          </label>
+        </div>
 
-<% if (typeof recentErrors !== 'undefined' && recentErrors && recentErrors.length > 0) { %>
-<h2 style="margin-top:28px; margin-bottom:12px;">Recent errors</h2>
-<div class="table-wrap card card-flush">
-  <table class="table">
-    <thead><tr>
-      <th>Video</th>
-      <th>Error</th>
-      <th>Time</th>
-      <th>Log</th>
-    </tr></thead>
-    <tbody>
-      <% recentErrors.forEach(v => { %>
-        <tr>
-          <td class="small"><%= v.title %></td>
-          <td class="small" style="color:var(--danger);"><%= v.last_error || '-' %></td>
-          <td class="small muted"><%= formatTime(v.created_at) %></td>
-          <td>
-            <% if (v.loop_job_id) { %>
-              <button type="button" class="btn btn-icon" title="View Log"
-                      onclick="openLoopLog('<%= v.loop_job_id %>')">📄</button>
-            <% } else { %>
-              -
-            <% } %>
-          </td>
-        </tr>
-      <% }) %>
-    </tbody>
-  </table>
-</div>
-<% } %>
+        <div id="yt-upload-progress" style="display:none; margin-top:18px;">
+          <div class="progress"><div class="progress-bar" id="yt-upload-bar" style="width:0%"></div></div>
+          <div class="small muted" id="yt-upload-status" style="margin-top:6px;">Starting…</div>
+        </div>
 
-<!-- Loop Log Modal -->
-<dialog id="loop-log-modal" class="modal" style="width:min(90vw,800px); max-height:80vh;">
-  <header class="modal-header">
-    <h3 id="loop-log-title">Loop Job Log</h3>
-    <button data-close-modal class="btn-close" aria-label="Close">&times;</button>
-  </header>
-  <div class="modal-body" style="padding:0;">
-    <pre id="loop-log-content" style="background:var(--bg); color:var(--text); padding:16px; margin:0; overflow:auto; max-height:60vh; font-size:12px; line-height:1.5; white-space:pre-wrap; word-break:break-all;"></pre>
+        <div id="yt-upload-error" class="alert alert-error" style="display:none; margin-top:14px;"></div>
+        <div id="yt-upload-done" class="alert alert-info" style="display:none; margin-top:14px;"></div>
+      </div>
+      <footer class="modal-footer">
+        <button type="button" class="btn" id="yt-upload-cancel-btn" style="display:none;">Cancel upload</button>
+        <button type="button" class="btn" data-close-modal id="yt-upload-close-btn">Close</button>
+        <button type="submit" class="btn btn-primary" id="yt-upload-submit-btn">Start upload</button>
+      </footer>
+    </form>
   </div>
-  <footer class="modal-footer">
-    <button type="button" id="loop-log-refresh" class="btn">Refresh</button>
-    <button type="button" data-close-modal class="btn btn-primary">Close</button>
-  </footer>
 </dialog>
 
 <script>
-// Loop log modal handler
-let currentLogUrl = null;
-function openLoopLog(jobId) {
-  currentLogUrl = '/looper/' + jobId + '/log';
-  document.getElementById('loop-log-title').textContent = 'Loop Job #' + jobId + ' — Log';
-  fetchLoopLog();
-  document.getElementById('loop-log-modal').showModal();
-}
-function openLoopLogByVideo(videoId) {
-  currentLogUrl = '/looper/video/' + videoId + '/log';
-  document.getElementById('loop-log-title').textContent = 'Loop Log (Video #' + videoId + ')';
-  fetchLoopLog();
-  document.getElementById('loop-log-modal').showModal();
-}
-async function fetchLoopLog() {
-  const el = document.getElementById('loop-log-content');
-  try {
-    const r = await fetch(currentLogUrl, { cache: 'no-store' });
-    el.textContent = r.ok ? await r.text() : 'Log not found.';
-    el.scrollTop = el.scrollHeight;
-  } catch (e) {
-    el.textContent = 'Error fetching log: ' + e.message;
+// Loop job detail modal handler
+(function() {
+  const dlg = document.getElementById('loop-job-detail');
+  if (!dlg) return;
+
+  const titleEl = document.getElementById('loop-job-title');
+  const badgeEl = document.getElementById('loop-job-badge');
+  const etaTopEl = document.getElementById('loop-job-eta-top');
+  const barEl = document.getElementById('loop-job-bar');
+  const labelEl = document.getElementById('loop-job-label');
+  const timeEl = document.getElementById('loop-job-time');
+  const speedEl = document.getElementById('loop-job-speed');
+  const phaseEl = document.getElementById('loop-job-phase');
+  const etaEl = document.getElementById('loop-job-eta');
+  const logEl = document.getElementById('loop-job-log');
+  const cancelForm = document.getElementById('loop-job-cancel-form');
+
+  let currentJobId = null;
+  let pollInterval = null;
+  let stickToBottom = true;
+
+  function fmtSec(s) {
+    if (s == null || !Number.isFinite(s) || s < 0) return '-';
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = Math.floor(s % 60);
+    return (h ? String(h).padStart(2, '0') + ':' : '') +
+      String(m).padStart(2, '0') + ':' + String(sec).padStart(2, '0');
   }
-}
-document.getElementById('loop-log-refresh').addEventListener('click', fetchLoopLog);
-document.getElementById('loop-log-modal').addEventListener('click', function(e) {
-  if (e.target === this) this.close();
-});
-document.querySelectorAll('#loop-log-modal [data-close-modal]').forEach(btn => {
-  btn.addEventListener('click', () => document.getElementById('loop-log-modal').close());
-});
+
+  window.openLoopLog = function(jobId) {
+    currentJobId = jobId;
+    titleEl.textContent = 'Loop Job #' + jobId;
+    
+    // Set cancel form target
+    cancelForm.action = '/looper/' + jobId + '/cancel';
+    
+    // Reset modal UI
+    badgeEl.className = 'badge badge-idle';
+    badgeEl.textContent = 'LOADING';
+    etaTopEl.textContent = '';
+    barEl.style.width = '0%';
+    labelEl.textContent = 'loading…';
+    timeEl.textContent = '-';
+    speedEl.textContent = '-';
+    phaseEl.textContent = '-';
+    etaEl.textContent = '-';
+    logEl.textContent = 'Loading log…';
+    cancelForm.style.display = 'none';
+
+    // Show modal
+    dlg.showModal();
+    
+    // Start polling immediately
+    pollJob();
+    pollInterval = setInterval(pollJob, 1500);
+  };
+
+  // Support opening logs by video id as well
+  window.openLoopLogByVideo = function(videoId) {
+    currentJobId = null;
+    titleEl.textContent = 'Loop Log (Video #' + videoId + ')';
+    badgeEl.className = 'badge badge-running';
+    badgeEl.textContent = 'COMPLETED';
+    etaTopEl.textContent = '';
+    barEl.style.width = '100%';
+    labelEl.textContent = '100% · Done';
+    timeEl.textContent = '-';
+    speedEl.textContent = '-';
+    phaseEl.textContent = 'completed';
+    etaEl.textContent = '-';
+    cancelForm.style.display = 'none';
+    logEl.textContent = 'Loading log…';
+
+    dlg.showModal();
+    fetchLogOnly('/looper/video/' + videoId + '/log');
+  };
+
+  async function fetchLogOnly(url) {
+    try {
+      const r = await fetch(url, { cache: 'no-store' });
+      logEl.textContent = r.ok ? await r.text() : 'Log not found.';
+      logEl.scrollTop = logEl.scrollHeight;
+    } catch (err) {
+      logEl.textContent = 'Error loading log: ' + err.message;
+    }
+  }
+
+  async function pollJob() {
+    if (!currentJobId) return;
+
+    try {
+      // 1. Fetch active jobs progress
+      const r = await fetch('/looper/progress', { cache: 'no-store' });
+      if (!r.ok) throw new Error('Progress failed');
+      const data = await r.json();
+      
+      const job = data.jobs.find(j => String(j.jobId) === String(currentJobId));
+      
+      if (job) {
+        // Job is still active
+        badgeEl.className = 'badge badge-idle';
+        badgeEl.textContent = job.phase || 'running';
+        
+        const pct = job.percent || 0;
+        barEl.style.width = pct + '%';
+        
+        const parts = [];
+        parts.push(pct + '%');
+        if (job.elapsedSec) parts.push(fmtSec(job.elapsedSec));
+        if (job.speed) parts.push(job.speed.toFixed(2) + 'x');
+        labelEl.textContent = parts.join(' · ') || 'working…';
+
+        timeEl.textContent = fmtSec(job.elapsedSec);
+        speedEl.textContent = job.speed ? job.speed.toFixed(2) + 'x' : '-';
+        phaseEl.textContent = job.phaseLabel || '-';
+        etaEl.textContent = job.etaSec ? fmtSec(job.etaSec) : '-';
+        etaTopEl.textContent = job.etaSec ? '~' + fmtSec(job.etaSec) + ' left' : '';
+        
+        cancelForm.style.display = '';
+      } else {
+        // Job is no longer active (finished or failed)
+        badgeEl.className = 'badge badge-running';
+        badgeEl.textContent = 'FINISHED';
+        barEl.style.width = '100%';
+        labelEl.textContent = '100% · Done';
+        phaseEl.textContent = 'completed';
+        cancelForm.style.display = 'none';
+        
+        // Stop polling since it's done
+        clearInterval(pollInterval);
+        pollInterval = null;
+      }
+      
+      // 2. Fetch tail logs
+      const logR = await fetch('/looper/' + currentJobId + '/log', { cache: 'no-store' });
+      if (logR.ok) {
+        const txt = await logR.text();
+        if (txt !== logEl.textContent) {
+          logEl.textContent = txt || '(belum ada log)';
+          if (stickToBottom) logEl.scrollTop = logEl.scrollHeight;
+        }
+      }
+    } catch (err) {
+      console.error('Error polling job:', err);
+    }
+  }
+
+  dlg.addEventListener('close', () => {
+    if (pollInterval) {
+      clearInterval(pollInterval);
+      pollInterval = null;
+    }
+    currentJobId = null;
+  });
+
+  // Handle Cancel Form submission via AJAX
+  cancelForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!currentJobId) return;
+    if (!confirm('Cancel loop job ini? Video output yang belum selesai akan dihapus.')) return;
+    
+    try {
+      const r = await fetch(cancelForm.action, {
+        method: 'POST',
+        headers: { 'Accept': 'application/json' }
+      });
+      if (r.ok) {
+        dlg.close();
+        window.location.reload();
+      } else {
+        const j = await r.json();
+        alert('Gagal cancel: ' + (j.error || 'Unknown error'));
+      }
+    } catch (err) {
+      alert('Error: ' + err.message);
+    }
+  });
+
+  // Copy log to clipboard
+  const copyBtn = document.getElementById('loop-job-copy-btn');
+  if (copyBtn) {
+    copyBtn.addEventListener('click', async () => {
+      try {
+        const text = logEl.textContent || '';
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(text);
+        } else {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.position = 'absolute';
+          ta.style.left = '-9999px';
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+        }
+        const originalText = copyBtn.textContent;
+        copyBtn.textContent = 'Copied!';
+        setTimeout(() => {
+          copyBtn.textContent = originalText;
+        }, 2000);
+      } catch (err) {
+        alert('Gagal menyalin log: ' + err.message);
+      }
+    });
+  }
+
+  dlg.addEventListener('click', function(e) {
+    if (e.target === this) this.close();
+  });
+})();
 </script>
 
 <script>
@@ -293,12 +807,8 @@ document.querySelectorAll('#loop-log-modal [data-close-modal]').forEach(btn => {
   const customRow = document.getElementById('custom-duration-row');
   const customInput = document.getElementById('custom_minutes');
   const sourceSelect = document.getElementById('source_video_id');
-  const estimateRow = document.getElementById('estimate-row');
-  const estimateBox = document.getElementById('estimate-box');
   const sourceThumb = document.getElementById('loop-source-thumb');
   const sourceEmpty = document.getElementById('loop-source-empty');
-  const sourceTitle = document.getElementById('loop-source-title');
-  const sourceMeta = document.getElementById('loop-source-meta');
   const formError = document.getElementById('loop-form-error');
 
   function selectedTargetSeconds() {
@@ -309,8 +819,7 @@ document.querySelectorAll('#loop-log-modal [data-close-modal]').forEach(btn => {
       if (!Number.isFinite(m) || m <= 0) return null;
       return Math.round(m * 60);
     }
-    const map = { '30m': 1800, '1h': 3600, '2h': 7200, '3h': 10800, '6h': 21600, '12h': 43200, '24h': 86400 };
-    return map[checked.value] || null;
+    return Number(checked.dataset.seconds) || null;
   }
 
   function updateCustomVisibility() {
@@ -319,36 +828,12 @@ document.querySelectorAll('#loop-log-modal [data-close-modal]').forEach(btn => {
     customRow.style.display = (customChecked && customChecked.checked) ? 'flex' : 'none';
   }
 
-  function updateEstimate() {
-    if (!estimateRow || !sourceSelect) return;
-    const target = selectedTargetSeconds();
-    const opt = sourceSelect.selectedOptions[0];
-    const srcDur = opt ? Number(opt.dataset.duration) : null;
-    if (!target || !srcDur) {
-      estimateRow.style.display = 'none';
-      return;
-    }
-    const loops = Math.ceil(target / srcDur);
-    const outputH = (target / 3600).toFixed(target % 3600 === 0 ? 0 : 1);
-    const srcLabel = srcDur >= 60
-      ? Math.floor(srcDur / 60) + 'm ' + Math.round(srcDur % 60) + 's'
-      : Math.round(srcDur) + 's';
-    const mode = document.getElementById('smooth') && document.getElementById('smooth').checked
-      ? 'Smooth mode aktif: buat seamless unit dulu, lalu loop sampai target.'
-      : 'Fast mode: langsung loop copy, cocok kalau source sudah seamless.';
-    estimateBox.textContent =
-      'Source ' + srcLabel + ' akan di-loop sekitar ' + loops + 'x untuk output ' +
-      outputH + ' jam. ' + mode;
-    estimateRow.style.display = 'block';
-  }
-
   function updateSourcePreview() {
     if (!sourceSelect) return;
     const opt = sourceSelect.selectedOptions[0];
     const hasVideo = opt && opt.value;
     const thumb = hasVideo ? opt.dataset.thumb : '';
-    if (sourceTitle) sourceTitle.textContent = hasVideo ? (opt.dataset.title || opt.textContent.trim()) : '';
-    if (sourceMeta) sourceMeta.textContent = hasVideo ? (opt.dataset.meta || '') : '';
+
     if (sourceThumb && sourceEmpty) {
       if (thumb) {
         sourceThumb.src = thumb;
@@ -361,7 +846,6 @@ document.querySelectorAll('#loop-log-modal [data-close-modal]').forEach(btn => {
       }
     }
     clearLoopError();
-    updateEstimate();
   }
 
   function showLoopError(message) {
@@ -379,11 +863,9 @@ document.querySelectorAll('#loop-log-modal [data-close-modal]').forEach(btn => {
   presetRadios.forEach(r => r.addEventListener('change', () => {
     clearLoopError();
     updateCustomVisibility();
-    updateEstimate();
   }));
   if (customInput) customInput.addEventListener('input', () => {
     clearLoopError();
-    updateEstimate();
   });
   if (sourceSelect) sourceSelect.addEventListener('change', updateSourcePreview);
 
@@ -402,24 +884,48 @@ document.querySelectorAll('#loop-log-modal [data-close-modal]').forEach(btn => {
     const updateCrossfadeVisibility = () => {
       crossfadeControl.style.opacity = smoothCheck.checked ? '1' : '0.4';
       if (crossfadeSlider) crossfadeSlider.disabled = !smoothCheck.checked;
-      updateEstimate();
     };
     smoothCheck.addEventListener('change', updateCrossfadeVisibility);
     updateCrossfadeVisibility();
   }
 
+  // Modal tabs helper
+  const createLoopModal = document.getElementById('create-loop');
+  if (createLoopModal) {
+    createLoopModal.querySelectorAll('.modal-tabs .tab').forEach((tab) => {
+      tab.addEventListener('click', () => {
+        const target = tab.dataset.tab;
+        createLoopModal.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+        createLoopModal.querySelectorAll('.modal-tabs .tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        const pnl = document.getElementById(target);
+        if (pnl) pnl.classList.add('active');
+      });
+    });
+
+    createLoopModal.addEventListener('close', () => {
+      createLoopModal.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+      createLoopModal.querySelectorAll('.modal-tabs .tab').forEach(t => t.classList.remove('active'));
+      const defaultTab = createLoopModal.querySelector('.modal-tabs .tab[data-tab="loop-tab-video"]');
+      if (defaultTab) defaultTab.classList.add('active');
+      const defaultPanel = document.getElementById('loop-tab-video');
+      if (defaultPanel) defaultPanel.classList.add('active');
+    });
+  }
+
   const form = document.getElementById('loop-form');
   if (form) {
-    form.addEventListener('submit', (e) => {
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      clearLoopError();
+
       if (!sourceSelect.value) {
-        e.preventDefault();
         showLoopError('Pilih video sumber dulu.');
         sourceSelect.focus();
         return;
       }
       const target = selectedTargetSeconds();
       if (!target) {
-        e.preventDefault();
         showLoopError('Pilih target durasi.');
         if (customInput) customInput.focus();
         return;
@@ -427,8 +933,46 @@ document.querySelectorAll('#loop-log-modal [data-close-modal]').forEach(btn => {
       const opt = sourceSelect.selectedOptions[0];
       const srcDur = opt ? Number(opt.dataset.duration) : null;
       if (srcDur && target < srcDur) {
-        e.preventDefault();
         showLoopError('Target lebih pendek dari video sumber. Pilih durasi yang lebih panjang.');
+        return;
+      }
+
+      // Submit form via fetch AJAX
+      const submitBtn = form.querySelector('button[type="submit"]');
+      if (submitBtn) submitBtn.disabled = true;
+      
+      try {
+        const formData = new FormData(form);
+        const searchParams = new URLSearchParams(formData);
+        
+        const r = await fetch(form.action || '/looper/start', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Accept': 'application/json'
+          },
+          body: searchParams.toString()
+        });
+        
+        const res = await r.json();
+        if (!r.ok) throw new Error(res.error || 'Server error');
+        
+        // Success: close create-loop modal, reset form
+        createLoopModal.close();
+        form.reset();
+        updateCustomVisibility();
+        updateSourcePreview();
+        
+        // Open the monitoring detail modal with the returned jobId!
+        if (res.jobId) {
+          openLoopLog(res.jobId);
+        } else {
+          window.location.reload();
+        }
+      } catch (err) {
+        showLoopError('Gagal memulai loop: ' + err.message);
+      } finally {
+        if (submitBtn) submitBtn.disabled = false;
       }
     });
   }
@@ -443,35 +987,21 @@ document.querySelectorAll('#loop-log-modal [data-close-modal]').forEach(btn => {
     return h + 'h ' + m + 'm';
   }
 
-  let lastJobIds = <%- JSON.stringify(activeJobs.map(j => j.jobId)) %>;
-
-  async function poll() {
-    try {
-      const r = await fetch('/looper/progress', { cache: 'no-store' });
-      if (!r.ok) return;
-      const data = await r.json();
-      const currentIds = data.jobs.map(j => j.jobId);
-      const disappeared = lastJobIds.some(id => !currentIds.includes(id));
-      if (disappeared) { window.location.reload(); return; }
-      const newAppeared = currentIds.some(id => !lastJobIds.includes(id));
-      if (newAppeared) { window.location.reload(); return; }
-      data.jobs.forEach(j => {
-        const row = document.querySelector('tr[data-job-id="' + j.jobId + '"]');
-        if (!row) return;
-        const bar = row.querySelector('.progress-bar');
-        if (bar) bar.style.width = (j.percent || 0) + '%';
-        const pct = row.querySelector('.job-percent');
-        if (pct) pct.textContent = (j.percent || 0) + '%';
-        const sp = row.querySelector('.job-speed');
-        if (sp) sp.textContent = j.speed ? j.speed.toFixed(1) + 'x' : '-';
-        const eta = row.querySelector('.job-eta');
-        if (eta) eta.textContent = formatEta(j.etaSec);
-        const ph = row.querySelector('.job-phase');
-        if (ph) ph.textContent = j.phaseLabel || '-';
-      });
-    } catch (_) {}
+  // Live poll active jobs if there are any looping videos on the page
+  const hasLoopingVideos = document.querySelector('.badge-idle') !== null;
+  if (hasLoopingVideos) {
+    setInterval(async () => {
+      try {
+        const r = await fetch('/looper/progress', { cache: 'no-store' });
+        if (!r.ok) return;
+        const data = await r.json();
+        // If there are no active jobs left, but we had looping videos, reload to show ready/error status
+        if (data.jobs.length === 0) {
+          window.location.reload();
+        }
+      } catch (_) {}
+    }, 4000);
   }
-  if (lastJobIds.length > 0) setInterval(poll, 2000);
 
   // Init.
   updateCustomVisibility();
@@ -479,4 +1009,269 @@ document.querySelectorAll('#loop-log-modal [data-close-modal]').forEach(btn => {
 })();
 </script>
 
+<!-- Modals script logic copied from videos.ejs -->
+<script>
+// Video preview player modal logic
+(function() {
+  const dlg = document.getElementById('video-preview');
+  if (!dlg) return;
+  const player = document.getElementById('preview-player');
+  const titleEl = document.getElementById('preview-title');
+  const infoEl = document.getElementById('preview-info');
+  const errorEl = document.getElementById('preview-error');
+  const captureBtn = document.getElementById('preview-capture-thumb');
+  const downloadBtn = document.getElementById('preview-download-thumb');
+  const statusEl = document.getElementById('preview-thumb-status');
+  let currentVideoId = null;
+
+  document.addEventListener('modal:before-open', (e) => {
+    if (e.detail.id !== 'video-preview') return;
+    const btn = e.detail.trigger;
+    if (!btn) return;
+    const src = btn.dataset.videoSrc || '';
+    currentVideoId = btn.dataset.videoId || null;
+    titleEl.textContent = btn.dataset.videoTitle || 'Preview';
+    infoEl.textContent = btn.dataset.videoInfo || '';
+    errorEl.style.display = 'none';
+    player.style.display = 'block';
+    player.src = src;
+    player.load();
+    statusEl.textContent = '';
+    if (currentVideoId) {
+      downloadBtn.href = '/videos/' + currentVideoId + '/thumb/download';
+      downloadBtn.style.display = 'inline-flex';
+      captureBtn.style.display = 'inline-flex';
+    } else {
+      downloadBtn.style.display = 'none';
+      captureBtn.style.display = 'none';
+    }
+  });
+
+  player.addEventListener('error', () => {
+    player.style.display = 'none';
+    errorEl.style.display = 'block';
+  });
+
+  dlg.addEventListener('close', () => {
+    player.pause();
+    player.removeAttribute('src');
+    player.load();
+    currentVideoId = null;
+  });
+
+  if (captureBtn) {
+    captureBtn.addEventListener('click', async () => {
+      if (!currentVideoId) return;
+      const t = player.currentTime;
+      if (!Number.isFinite(t)) {
+        statusEl.textContent = 'Player belum siap.';
+        return;
+      }
+      captureBtn.disabled = true;
+      statusEl.textContent = `⏳ Capturing frame at ${t.toFixed(1)}s…`;
+      try {
+        const fd = new FormData();
+        fd.append('at_second', t.toFixed(3));
+        const r = await fetch('/videos/' + currentVideoId + '/regen-thumb', {
+          method: 'POST',
+          headers: { 'Accept': 'application/json' },
+          body: fd,
+        });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const j = await r.json();
+        if (!j.ok) throw new Error(j.error || 'Failed');
+        statusEl.textContent = `✓ Thumbnail updated (frame at ${t.toFixed(1)}s). Refresh library untuk lihat.`;
+        document.querySelectorAll('img[src^="/videos/' + currentVideoId + '/thumb"]').forEach(img => {
+          img.src = '/videos/' + currentVideoId + '/thumb?v=' + Date.now();
+        });
+      } catch (err) {
+        statusEl.textContent = '✗ Gagal: ' + err.message;
+      } finally {
+        captureBtn.disabled = false;
+      }
+    });
+  }
+})();
+
+// Edit video modal populate logic
+document.addEventListener('modal:before-open', (e) => {
+  if (e.detail.id !== 'edit-video') return;
+  const btn = e.detail.trigger;
+  if (!btn || !btn.dataset.videoId) return;
+  document.getElementById('edit-video-form').action = '/videos/' + btn.dataset.videoId + '/edit';
+  document.getElementById('edit-video-title').value = btn.dataset.videoTitle || '';
+  document.getElementById('edit-video-folder').value = btn.dataset.folderId || '';
+});
+
+// YouTube Upload Modal logic
+(function() {
+  const form = document.getElementById('upload-youtube-form');
+  if (!form) return;
+  const dlg = document.getElementById('upload-youtube');
+  const titleInput = document.getElementById('yt-upload-title');
+  const privacyInput = document.getElementById('yt-upload-privacy');
+  const categoryInput = document.getElementById('yt-upload-category');
+  const progressDiv = document.getElementById('yt-upload-progress');
+  const bar = document.getElementById('yt-upload-bar');
+  const statusDiv = document.getElementById('yt-upload-status');
+  const errorDiv = document.getElementById('yt-upload-error');
+  const doneDiv = document.getElementById('yt-upload-done');
+  const submitBtn = document.getElementById('yt-upload-submit-btn');
+  const cancelBtn = document.getElementById('yt-upload-cancel-btn');
+  const closeBtn = document.getElementById('yt-upload-close-btn');
+
+  let currentVideoId = null;
+  let activeJobId = null;
+  let pollInterval = null;
+
+  document.addEventListener('modal:before-open', (e) => {
+    if (e.detail.id !== 'upload-youtube') return;
+    const btn = e.detail.trigger;
+    if (!btn) return;
+
+    // Reset UI
+    currentVideoId = btn.dataset.videoId;
+    titleInput.value = btn.dataset.videoTitle || '';
+    privacyInput.value = 'unlisted';
+    categoryInput.value = '10';
+
+    progressDiv.style.display = 'none';
+    errorDiv.style.display = 'none';
+    doneDiv.style.display = 'none';
+    submitBtn.style.display = 'inline-flex';
+    submitBtn.disabled = false;
+    cancelBtn.style.display = 'none';
+    closeBtn.disabled = false;
+
+    // If click YouTube upload icon on an active job, resume watching progress
+    const watchJob = btn.dataset.ytWatchJob;
+    if (watchJob) {
+      activeJobId = watchJob;
+      startPolling();
+    }
+  });
+
+  dlg.addEventListener('close', () => {
+    stopPolling();
+  });
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!currentVideoId) return;
+
+    submitBtn.disabled = true;
+    errorDiv.style.display = 'none';
+    progressDiv.style.display = 'block';
+    bar.style.width = '0%';
+    statusDiv.textContent = 'Memulai upload...';
+    closeBtn.disabled = true;
+
+    try {
+      const r = await fetch('/youtube/upload/' + currentVideoId, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: titleInput.value,
+          privacy: privacyInput.value,
+          category_id: categoryInput.value,
+        }),
+      });
+      const res = await r.json();
+      if (!r.ok) throw new Error(res.error || 'Request failed');
+
+      activeJobId = res.jobId;
+      startPolling();
+    } catch (err) {
+      errorDiv.textContent = 'Gagal upload: ' + err.message;
+      errorDiv.style.display = 'block';
+      submitBtn.disabled = false;
+      closeBtn.disabled = false;
+    }
+  });
+
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', async () => {
+      if (!activeJobId) return;
+      if (!confirm('Cancel upload ke YouTube?')) return;
+      cancelBtn.disabled = true;
+      try {
+        await fetch('/youtube/upload/jobs/' + activeJobId + '/cancel', { method: 'POST' });
+        stopPolling();
+        progressDiv.style.display = 'none';
+        errorDiv.textContent = 'Upload dibatalkan.';
+        errorDiv.style.display = 'block';
+        submitBtn.style.display = 'inline-flex';
+        submitBtn.disabled = false;
+        cancelBtn.style.display = 'none';
+        closeBtn.disabled = false;
+      } catch (err) {
+        alert('Gagal cancel: ' + err.message);
+        cancelBtn.disabled = false;
+      }
+    });
+  }
+
+  function startPolling() {
+    submitBtn.style.display = 'none';
+    cancelBtn.style.display = 'inline-flex';
+    cancelBtn.disabled = false;
+    progressDiv.style.display = 'block';
+    closeBtn.disabled = true;
+
+    stopPolling();
+    pollInterval = setInterval(async () => {
+      try {
+        const r = await fetch('/youtube/upload/jobs/' + activeJobId);
+        if (!r.ok) {
+          if (r.status === 404) {
+            stopPolling();
+            errorDiv.textContent = 'Job tidak ditemukan.';
+            errorDiv.style.display = 'block';
+            resetToStart();
+          }
+          return;
+        }
+        const job = await r.json();
+        bar.style.width = (job.percent || 0) + '%';
+        statusDiv.textContent = `Uploading: ${job.percent || 0}% (${job.status})`;
+
+        if (job.status === 'completed') {
+          stopPolling();
+          progressDiv.style.display = 'none';
+          doneDiv.innerHTML = `✓ Upload selesai! Video ID: <a href="https://youtu.be/${job.youtubeVideoId}" target="_blank" style="color:var(--accent);text-decoration:underline;">${job.youtubeVideoId}</a>`;
+          doneDiv.style.display = 'block';
+          cancelBtn.style.display = 'none';
+          closeBtn.disabled = false;
+          // Refresh list to update YT badges
+          setTimeout(() => window.location.reload(), 1500);
+        } else if (job.status === 'error') {
+          stopPolling();
+          progressDiv.style.display = 'none';
+          errorDiv.textContent = 'Upload gagal: ' + (job.lastError || 'Unknown error');
+          errorDiv.style.display = 'block';
+          resetToStart();
+        }
+      } catch (err) {
+        console.error('Error polling job:', err);
+      }
+    }, 1500);
+  }
+
+  function stopPolling() {
+    if (pollInterval) {
+      clearInterval(pollInterval);
+      pollInterval = null;
+    }
+  }
+
+  function resetToStart() {
+    submitBtn.style.display = 'inline-flex';
+    submitBtn.disabled = false;
+    cancelBtn.style.display = 'none';
+    closeBtn.disabled = false;
+  }
+})();
+</script>
+
+<%- include('partials/video-detail-modal') %>
 <%- include('partials/footer') %>

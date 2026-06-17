@@ -18,7 +18,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 500 * 1024 * 1024 }, // 500 MB — audio files are much smaller than video
+  limits: { fileSize: 2 * 1024 * 1024 * 1024 }, // 2 GB
   fileFilter: (_req, file, cb) => {
     if (!audioManager.isSupportedFilename(file.originalname)) {
       return cb(new Error('Unsupported audio format (use mp3/m4a/aac/wav/ogg/opus/flac/wma)'));
@@ -28,7 +28,10 @@ const upload = multer({
 });
 
 router.get('/', (req, res) => {
-  const tracks = audioManager.list();
+  const tracks = audioManager.list().map(t => {
+    t._readiness = audioManager.assessStreamReadiness(t);
+    return t;
+  });
   res.render('audio', {
     title: 'Audio Library',
     activeNav: 'audio',
@@ -95,20 +98,92 @@ router.post('/:id/normalize', (req, res) => {
   const filePath = audioManager.getFilePath(id);
   if (!filePath) return res.redirect('/audio?error=File+missing+on+disk');
 
+  const { db } = require('../db');
+  
+  // Format localized time for status log
+  const logTime = () => `[${new Date().toLocaleTimeString('en-US', { hour12: false })}]`;
+
+  // Update status to normalizing, clear error, write starting log
+  db.prepare(`UPDATE audio_tracks SET status='normalizing', status_log=?, last_error=NULL WHERE id=?`)
+    .run(`${logTime()} Starting manual loudness normalization...\n`, id);
+
   // Run normalize in background so response isn't blocked.
-  setImmediate(() => {
-    const { db } = require('../db');
+  setImmediate(async () => {
+    const appendLog = (msg) => {
+      db.prepare(`UPDATE audio_tracks SET status_log = COALESCE(status_log, '') || ? WHERE id=?`)
+        .run(`${logTime()} ${msg}\n`, id);
+    };
+
+    audioManager.activeJobs.set(id, { percent: 0 });
+
     try {
-      const result = audioManager.normalize(filePath);
-      if (!result.ok) {
-        db.prepare(`UPDATE audio_tracks
-          SET last_error=?, normalized=0
-          WHERE id=?`).run('Loudness normalization failed: ' + result.error, id);
+      appendLog('Running loudness analysis pass (Pass 1 of 2)...');
+      
+      const measured = await audioManager.analyzeLoudness(
+        filePath,
+        (time) => {
+          if (track.duration_seconds) {
+            const pct = Math.min(49, Math.round((time / track.duration_seconds) * 50));
+            const job = audioManager.activeJobs.get(id);
+            if (job) job.percent = pct;
+          }
+        },
+        (child) => {
+          const job = audioManager.activeJobs.get(id);
+          if (job) job.process = child;
+        }
+      );
+      if (!measured) {
+        const activeJob = audioManager.getActiveJob(id);
+        if (activeJob && activeJob.cancelled) {
+          db.prepare(`UPDATE audio_tracks SET status='uploaded', status_log = COALESCE(status_log, '') || ? WHERE id=?`)
+            .run(`${logTime()} Normalization cancelled by user.\n`, id);
+          return;
+        }
+        const errMsg = 'Loudness analysis failed (Pass 1)';
+        db.prepare(`UPDATE audio_tracks SET status='error', last_error=?, normalized=0, status_log = COALESCE(status_log, '') || ? WHERE id=?`)
+          .run(errMsg, `${logTime()} Error: ${errMsg}. Check logs/audio-normalize.log for details.\n`, id);
         return;
       }
+
+      appendLog(`Loudness analyzed: Input = ${measured.input_i.toFixed(1)} LUFS, True Peak = ${measured.input_tp.toFixed(1)} dBFS, LRA = ${measured.input_lra.toFixed(1)} LU.`);
+      appendLog('Applying loudness normalization and brick-wall limiting to -14 LUFS (Pass 2 of 2)...');
+
+      const ok = await audioManager.applyLoudnessNormalization(
+        filePath,
+        measured,
+        (time) => {
+          if (track.duration_seconds) {
+            const pct = Math.min(99, Math.round(50 + (time / track.duration_seconds) * 50));
+            const job = audioManager.activeJobs.get(id);
+            if (job) job.percent = pct;
+          }
+        },
+        (child) => {
+          const job = audioManager.activeJobs.get(id);
+          if (job) job.process = child;
+        }
+      );
+      if (!ok) {
+        const activeJob = audioManager.getActiveJob(id);
+        if (activeJob && activeJob.cancelled) {
+          db.prepare(`UPDATE audio_tracks SET status='uploaded', status_log = COALESCE(status_log, '') || ? WHERE id=?`)
+            .run(`${logTime()} Normalization cancelled by user.\n`, id);
+          return;
+        }
+        const errMsg = 'Loudness normalization failed (Pass 2)';
+        db.prepare(`UPDATE audio_tracks SET status='error', last_error=?, normalized=0, status_log = COALESCE(status_log, '') || ? WHERE id=?`)
+          .run(errMsg, `${logTime()} Error: ${errMsg}. Check logs/audio-normalize.log for details.\n`, id);
+        return;
+      }
+
+      appendLog('Loudness normalization complete! File updated.');
+      appendLog('Probing updated file metadata...');
+
       const fs = require('fs');
       const stat = fs.statSync(filePath);
       const newInfo = audioManager.probe(filePath);
+      
       db.prepare(`UPDATE audio_tracks SET
         size_bytes=?,
         codec=COALESCE(?, codec),
@@ -118,22 +193,61 @@ router.post('/:id/normalize', (req, res) => {
         true_peak_db=?,
         loudness_range=?,
         normalized=1,
-        last_error=NULL
+        status='uploaded',
+        last_error=NULL,
+        status_log = COALESCE(status_log, '') || ?
         WHERE id=?`).run(
         stat.size,
         newInfo.codec, newInfo.bitrate, newInfo.sampleRate,
-        result.measured.input_i,
-        result.measured.input_tp,
-        result.measured.input_lra,
+        audioManager.LOUDNESS_TARGET.I, // -14
+        audioManager.LOUDNESS_TARGET.TP, // -1.5
+        measured.input_lra,
+        `${logTime()} Finished! Audio normalized successfully.\n`,
         id,
       );
     } catch (e) {
-      db.prepare(`UPDATE audio_tracks SET last_error=?
-        WHERE id=?`).run('Re-normalize crashed: ' + e.message, id);
+      db.prepare(`UPDATE audio_tracks SET status='error', last_error=?, status_log = COALESCE(status_log, '') || ? WHERE id=?`)
+        .run('Normalization crashed: ' + e.message, `${logTime()} Crash: ${e.message}\n`, id);
+    } finally {
+      audioManager.activeJobs.delete(id);
     }
   });
 
-  res.redirect('/audio?notice=Re-normalize+started+in+background');
+  res.redirect('/audio?notice=Normalization+started+in+background');
+});
+
+// GET /audio/:id/status -> Polling endpoint for status & logs
+router.get('/:id/status', (req, res) => {
+  const track = audioManager.get(req.params.id);
+  if (!track) return res.status(404).json({ error: 'Track not found' });
+  const activeJob = audioManager.getActiveJob(track.id);
+  res.json({
+    ok: true,
+    id: track.id,
+    title: track.title,
+    status: track.status,
+    percent: activeJob ? activeJob.percent : null,
+    normalized: track.normalized,
+    last_error: track.last_error,
+    log_tail: track.status_log,
+  });
+});
+
+// POST /audio/:id/cancel -> Cancel running normalization
+router.post('/:id/cancel', (req, res) => {
+  const id = Number(req.params.id);
+  audioManager.cancel(id);
+  res.redirect('/audio?notice=Normalization+cancelled');
+});
+
+// GET /audio/:id/metadata -> Detail info endpoint
+router.get('/:id/metadata', (req, res) => {
+  const track = audioManager.get(req.params.id);
+  if (!track) return res.status(404).json({ error: 'Track not found' });
+  res.json({
+    ok: true,
+    track,
+  });
 });
 
 // -- Media serving (auth-protected) ---------------------------------------

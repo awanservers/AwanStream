@@ -366,11 +366,27 @@ function start(videoId, presetName, x264Preset = 'medium') {
         const srcSize = fs.statSync(outPath).size;
         try { fs.unlinkSync(srcPath); } catch (_) {}
         fs.renameSync(outPath, srcPath);
-        // Re-probe the new file for accurate duration on the prepared output.
-        const newDur = probeDuration(srcPath) || duration || null;
-        db.prepare(`UPDATE videos
-          SET status='ready', size_bytes=?, duration_seconds=?, last_error=NULL
-          WHERE id=?`).run(srcSize, newDur, id);
+        // Re-probe the new file for accurate metadata on the prepared output.
+        let newDur = duration;
+        let info = null;
+        try {
+          info = probeVideoInfo(srcPath);
+          if (info) {
+            newDur = info.duration || duration || null;
+          }
+        } catch (_) {}
+
+        if (info) {
+          db.prepare(`UPDATE videos
+            SET status='ready', size_bytes=?, duration_seconds=?, src_width=?, src_height=?, src_fps=?,
+                has_audio=?, gop_seconds=?, video_bitrate_kbps=?, last_error=NULL
+            WHERE id=?`).run(srcSize, newDur, info.width, info.height, info.fps,
+              info.audioCodec ? 1 : 0, info.gopSeconds, info.videoBitrateKbps, id);
+        } else {
+          db.prepare(`UPDATE videos
+            SET status='ready', size_bytes=?, duration_seconds=?, last_error=NULL
+            WHERE id=?`).run(srcSize, newDur, id);
+        }
         // Regenerate thumbnail from the prepared file.
         const thumb = generateThumbnail(srcPath, id);
         if (thumb) {

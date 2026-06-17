@@ -832,7 +832,7 @@ Helper internal `parseLocalToUTC(str, tz)` — convert `YYYY-MM-DDTHH:MM` (brows
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/looper` | Form + active jobs + recent errors + audio tracks dropdown |
+| GET | `/looper` | List video hasil loop + form modal + active jobs + recent errors + audio tracks dropdown |
 | POST | `/looper/start` | Start loop job dengan optional audio overlay |
 | GET | `/looper/progress` | JSON polling untuk update active jobs table |
 | POST | `/looper/:jobId/cancel` | Abort job + cleanup |

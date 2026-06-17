@@ -178,6 +178,13 @@
               <a href="/videos/<%= v.id %>/download" class="btn-icon" title="Download" download>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
               </a>
+              <button type="button" class="btn-icon"
+                      data-open-modal="video-detail"
+                      data-video-id="<%= v.id %>"
+                      data-video-title="<%= v.title %>"
+                      title="Detail Video">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+              </button>
               <% if (v.status === 'ready') { %>
                 <% if (v.youtube_status === 'uploading' || v.youtube_status === 'pending') { %>
                   <button type="button" class="btn-icon"
@@ -1621,4 +1628,5 @@ document.addEventListener('modal:before-open', (e) => {
 })();
 </script>
 
+<%- include('partials/video-detail-modal') %>
 <%- include('partials/footer') %>

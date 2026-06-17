@@ -374,7 +374,14 @@ document.addEventListener('modal:before-open', (e) => {
     } catch (err) {
       saveBtn.disabled = false;
       saveBtn.textContent = 'Save changes';
-      alert('Error: ' + err.message);
+      Swal.fire({
+        icon: 'error',
+        title: 'Error',
+        text: err.message,
+        confirmButtonColor: '#e5484d',
+        background: '#161b2c',
+        color: '#f0f3f8'
+      });
     }
   });
 })();

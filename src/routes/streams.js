@@ -279,6 +279,23 @@ router.post('/:id/edit', (req, res) => {
     safeVol,
     id,
   );
+
+  const schedule = parseScheduleInput(req.body);
+  if (schedule.error) {
+    return res.redirect(back + '?error=' + schedule.error);
+  }
+  const pending = db.prepare("SELECT id FROM schedules WHERE stream_id=? AND status='pending'").get(id);
+  if (schedule.enabled) {
+    if (pending) {
+      db.prepare("UPDATE schedules SET start_at=?, stop_at=? WHERE id=?")
+        .run(schedule.startIso, schedule.stopIso, pending.id);
+    } else {
+      db.prepare("INSERT INTO schedules (stream_id, start_at, stop_at, status) VALUES (?, ?, ?, 'pending')")
+        .run(id, schedule.startIso, schedule.stopIso);
+    }
+  } else {
+    db.prepare("DELETE FROM schedules WHERE stream_id=? AND status='pending'").run(id);
+  }
   res.redirect(back + '?notice=Stream+updated');
 });
 

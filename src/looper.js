@@ -373,7 +373,7 @@ function runSmoothPhase1(ctx) {
     `[0:v]trim=${L - D}:${L},setpts=PTS-STARTPTS[vtail]`,
     `[0:v]trim=${D}:${L - D},setpts=PTS-STARTPTS[vmid]`,
     `[vtail][vhead]xfade=transition=fade:duration=${D}:offset=0[vblend]`,
-    `[vblend][vmid]concat=n=2:v=1:a=0[vout]`,
+    `[vmid][vblend]concat=n=2:v=1:a=0[vout]`,
   ].join(';');
 
   let filter = vfilter;
@@ -384,11 +384,14 @@ function runSmoothPhase1(ctx) {
       `[0:a]atrim=${L - D}:${L},asetpts=PTS-STARTPTS[atail]`,
       `[0:a]atrim=${D}:${L - D},asetpts=PTS-STARTPTS[amid]`,
       `[atail][ahead]acrossfade=d=${D}[ablend]`,
-      `[ablend][amid]concat=n=2:v=0:a=1[aout]`,
+      `[amid][ablend]concat=n=2:v=0:a=1[aout]`,
     ].join(';');
     filter = vfilter + ';' + afilter;
     mapArgs.push('-map', '[aout]');
   }
+
+  const fps = info.fps || 30;
+  const gop = Math.round(2 * fps);
 
   const args = [
     '-hide_banner', '-y',
@@ -402,6 +405,8 @@ function runSmoothPhase1(ctx) {
     '-profile:v', 'high',
     '-pix_fmt', 'yuv420p',
     '-crf', '20',
+    '-g', String(gop),
+    '-keyint_min', String(gop),
   ];
   if (hasAudio) {
     args.push('-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-ac', '2');
@@ -584,10 +589,24 @@ function finishJob(ctx, code, signal) {
   if (code === 0 && fs.existsSync(outPath)) {
     try {
       const size = fs.statSync(outPath).size;
-      const actualDuration = transcoder.probeDuration(outPath) || ctx.target;
-      db.prepare(`UPDATE videos
-        SET status='ready', size_bytes=?, duration_seconds=?, last_error=NULL
-        WHERE id=?`).run(size, actualDuration, outputVideoId);
+      let actualDuration = ctx.target;
+      let info = null;
+      try {
+        info = transcoder.probeVideoInfo(outPath);
+        if (info) {
+          actualDuration = info.duration || ctx.target;
+        }
+      } catch (_) {}
+      if (info) {
+        db.prepare(`UPDATE videos
+        SET status='ready', size_bytes=?, duration_seconds=?, src_width=?, src_height=?, src_fps=?, has_audio=?, gop_seconds=?, video_bitrate_kbps=?, last_error=NULL
+        WHERE id=?`).run(size, actualDuration, info.width, info.height, info.fps,
+          info.audioCodec ? 1 : 0, info.gopSeconds, info.videoBitrateKbps, outputVideoId);
+      } else {
+        db.prepare(`UPDATE videos
+          SET status='ready', size_bytes=?, duration_seconds=?, last_error=NULL
+          WHERE id=?`).run(size, actualDuration, outputVideoId);
+      }
       try {
         const thumb = transcoder.generateThumbnail(outPath, outputVideoId);
         if (thumb) {

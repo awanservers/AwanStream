@@ -15,6 +15,7 @@ services:
       - awanstream-db:/app/db
       - awanstream-logs:/app/logs
       - awanstream-uploads:/app/public/uploads
+      - /var/lib/vnstat:/var/lib/vnstat:ro
     logging:
       driver: json-file
       options:

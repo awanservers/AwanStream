@@ -23,4 +23,21 @@ function parseLocalToUTC(localStr, tz) {
   return new Date(guessUTC - offset).toISOString();
 }
 
-module.exports = { parseLocalToUTC };
+// Convert a UTC ISO string into a local "YYYY-MM-DDTHH:MM" string for <input type="datetime-local">
+// in the given IANA timezone.
+function formatUTCToLocalInput(utcStr, tz) {
+  if (!utcStr) return '';
+  const d = new Date(utcStr);
+  if (Number.isNaN(d.getTime())) return '';
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, hourCycle: 'h23',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit'
+  }).formatToParts(d).reduce((acc, p) => {
+    if (p.type !== 'literal') acc[p.type] = p.value;
+    return acc;
+  }, {});
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+}
+
+module.exports = { parseLocalToUTC, formatUTCToLocalInput };

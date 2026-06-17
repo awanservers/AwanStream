@@ -2,25 +2,7 @@
     </main>
   </div>
 
-  <!-- Global confirm modal, reused by any form with data-confirm -->
-  <dialog id="confirm-dialog" class="modal modal-sm">
-    <div class="modal-card">
-      <header class="modal-header">
-        <h2 id="confirm-title">Konfirmasi</h2>
-        <button type="button" class="modal-close" data-close-modal aria-label="Close">×</button>
-      </header>
-      <div class="modal-body">
-        <p id="confirm-message" class="muted">Lanjutkan aksi ini?</p>
-      </div>
-      <footer class="modal-footer">
-        <button type="button" class="btn" data-close-modal>Batal</button>
-        <button type="button" class="btn btn-danger" id="confirm-ok">Lanjutkan</button>
-      </footer>
-    </div>
-  </dialog>
 
-  <!-- Toast container for flash messages (rendered by EJS) -->
-  <div id="toast-root" class="toast-root" aria-live="polite"></div>
 
   <script>
     // Modal controller. Wire up to any <dialog id="..."> using buttons with
@@ -86,66 +68,49 @@
       });
     })();
 
-    // Custom confirm — replaces native window.confirm() on forms that opt-in via
+    // Custom confirm via SweetAlert2 — replaces native window.confirm() on forms that opt-in via
     //   <form data-confirm="message" data-confirm-action="Delete">.
     (function () {
-      const dlg = document.getElementById('confirm-dialog');
-      const msg = document.getElementById('confirm-message');
-      const title = document.getElementById('confirm-title');
-      const ok = document.getElementById('confirm-ok');
-      let pending = null; // form waiting to be submitted on confirm
-
       document.addEventListener('submit', (e) => {
         const form = e.target.closest('form[data-confirm]');
         if (!form || form.dataset._confirmed === '1') return;
         e.preventDefault();
-        pending = form;
-        title.textContent = form.dataset.confirmTitle || 'Konfirmasi';
-        msg.textContent = form.dataset.confirm || 'Lanjutkan aksi ini?';
-        ok.textContent = form.dataset.confirmAction || 'Lanjutkan';
-        ok.className = 'btn ' + (form.dataset.confirmVariant === 'primary' ? 'btn-primary' : 'btn-danger');
-        dlg.showModal();
-      });
-
-      ok.addEventListener('click', () => {
-        if (!pending) return;
-        pending.dataset._confirmed = '1';
-        // Animate the confirm dialog out, then submit. We can submit
-        // immediately though — UX-wise users expect the form to fire right
-        // away on confirm click. Just close gracefully in parallel.
-        if (window.__closeModal) window.__closeModal(dlg);
-        else dlg.close();
-        pending.requestSubmit();
-        pending = null;
-      });
-
-      dlg.addEventListener('close', () => {
-        if (pending) {
-          // User cancelled; reset marker so future submits still ask.
-          delete pending.dataset._confirmed;
-          pending = null;
-        }
+        
+        const message = form.dataset.confirm || 'Lanjutkan aksi ini?';
+        const title = form.dataset.confirmTitle || 'Konfirmasi';
+        const confirmText = form.dataset.confirmAction || 'Lanjutkan';
+        const isDanger = form.dataset.confirmVariant !== 'primary';
+        
+        Swal.fire({
+          title: title,
+          text: message,
+          icon: 'warning',
+          showCancelButton: true,
+          confirmButtonColor: isDanger ? '#e5484d' : '#4f8cff',
+          cancelButtonColor: '#2b3040',
+          confirmButtonText: confirmText,
+          cancelButtonText: 'Batal',
+          background: '#161b2c',
+          color: '#f0f3f8'
+        }).then((result) => {
+          if (result.isConfirmed) {
+            form.dataset._confirmed = '1';
+            form.requestSubmit();
+          }
+        });
       });
     })();
 
-    // Toast auto-dismiss for flash messages shown via partials/flash.ejs (class .alert).
-    // Also strips ?notice=/?error= from the URL so refreshing the page doesn't
+    // Strips ?notice=/?error= from the URL so refreshing the page doesn't
     // re-show the same toast over and over.
     (function () {
-      const root = document.getElementById('toast-root');
-      const toasts = document.querySelectorAll('.alert[data-toast]');
-      toasts.forEach((el) => {
-        root.appendChild(el);
-        setTimeout(() => {
-          el.classList.add('toast-fade');
-          setTimeout(() => el.remove(), 300);
-        }, 4000);
-      });
-      if (toasts.length > 0 && window.history && window.history.replaceState) {
+      if (window.history && window.history.replaceState) {
         const url = new URL(window.location.href);
-        url.searchParams.delete('notice');
-        url.searchParams.delete('error');
-        window.history.replaceState({}, '', url.pathname + (url.search ? url.search : '') + url.hash);
+        if (url.searchParams.has('notice') || url.searchParams.has('error')) {
+          url.searchParams.delete('notice');
+          url.searchParams.delete('error');
+          window.history.replaceState({}, '', url.pathname + (url.search ? url.search : '') + url.hash);
+        }
       }
     })();
 

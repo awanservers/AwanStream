@@ -40,30 +40,30 @@ router.get('/', (req, res) => {
   const offset = (page - 1) * perPage;
 
   const folders = db.prepare(`
-    SELECT f.*, (SELECT COUNT(*) FROM videos v WHERE v.folder_id = f.id) AS video_count
+    SELECT f.*, (SELECT COUNT(*) FROM videos v WHERE v.folder_id = f.id AND v.loop_job_id IS NULL) AS video_count
     FROM folders f ORDER BY f.name ASC
   `).all();
   // Count videos without a folder.
-  const unfolderedCount = db.prepare('SELECT COUNT(*) AS c FROM videos WHERE folder_id IS NULL').get().c;
+  const unfolderedCount = db.prepare('SELECT COUNT(*) AS c FROM videos WHERE folder_id IS NULL AND loop_job_id IS NULL').get().c;
 
   let videos;
   let totalCount;
   if (folderId) {
-    totalCount = db.prepare('SELECT COUNT(*) AS c FROM videos WHERE folder_id=?').get(folderId).c;
+    totalCount = db.prepare('SELECT COUNT(*) AS c FROM videos WHERE folder_id=? AND loop_job_id IS NULL').get(folderId).c;
     videos = db.prepare(
-      'SELECT * FROM videos WHERE folder_id=? ORDER BY created_at DESC LIMIT ? OFFSET ?'
+      'SELECT * FROM videos WHERE folder_id=? AND loop_job_id IS NULL ORDER BY created_at DESC LIMIT ? OFFSET ?'
     ).all(folderId, perPage, offset);
   } else if (req.query.folder === '0') {
     // Explicitly show "unfiled" videos only.
-    totalCount = db.prepare('SELECT COUNT(*) AS c FROM videos WHERE folder_id IS NULL').get().c;
+    totalCount = db.prepare('SELECT COUNT(*) AS c FROM videos WHERE folder_id IS NULL AND loop_job_id IS NULL').get().c;
     videos = db.prepare(
-      'SELECT * FROM videos WHERE folder_id IS NULL ORDER BY created_at DESC LIMIT ? OFFSET ?'
+      'SELECT * FROM videos WHERE folder_id IS NULL AND loop_job_id IS NULL ORDER BY created_at DESC LIMIT ? OFFSET ?'
     ).all(perPage, offset);
   } else {
     // Show all videos.
-    totalCount = db.prepare('SELECT COUNT(*) AS c FROM videos').get().c;
+    totalCount = db.prepare('SELECT COUNT(*) AS c FROM videos WHERE loop_job_id IS NULL').get().c;
     videos = db.prepare(
-      'SELECT * FROM videos ORDER BY created_at DESC LIMIT ? OFFSET ?'
+      'SELECT * FROM videos WHERE loop_job_id IS NULL ORDER BY created_at DESC LIMIT ? OFFSET ?'
     ).all(perPage, offset);
   }
 
@@ -420,18 +420,24 @@ router.get('/:id/prepare-log', (req, res) => {
 
 router.post('/:id/delete', (req, res) => {
   const video = db.prepare('SELECT * FROM videos WHERE id=?').get(req.params.id);
-  if (!video) return res.redirect('/videos');
+  const back = req.body.back || '/videos';
+  if (!video) return res.redirect(back + (back.includes('?') ? '&' : '?') + 'error=Video+not+found');
   if (transcoder.isRunning(video.id)) transcoder.cancel(video.id);
   const inUse = db.prepare(`SELECT COUNT(*) AS c FROM streams
     WHERE video_id=? AND status='running'`).get(video.id).c;
   if (inUse > 0) {
-    return res.redirect('/videos?error=Video+is+used+by+a+running+stream');
+    return res.redirect(back + (back.includes('?') ? '&' : '?') + 'error=Video+is+used+by+a+running+stream');
   }
   db.prepare('DELETE FROM streams WHERE video_id=?').run(video.id);
   db.prepare('DELETE FROM videos WHERE id=?').run(video.id);
   const p = path.join(uploadDir, video.filename);
   if (fs.existsSync(p)) try { fs.unlinkSync(p); } catch (_) {}
-  res.redirect('/videos');
+  // Cleanup thumbnail too.
+  if (video.thumbnail) {
+    const thumbPath = path.join(uploadDir, 'thumbs', video.thumbnail);
+    if (fs.existsSync(thumbPath)) try { fs.unlinkSync(thumbPath); } catch (_) {}
+  }
+  res.redirect(back + (back.includes('?') ? '&' : '?') + 'notice=Video+deleted');
 });
 
 // --- Folder management ---
@@ -612,6 +618,48 @@ function safeDownloadName(title, fallbackExt = 'mp4') {
   if (!/\.[a-z0-9]{2,5}$/i.test(clean)) return `${clean || 'video'}.${fallbackExt}`;
   return clean;
 }
+
+router.get('/:id/metadata', (req, res) => {
+  const video = db.prepare('SELECT * FROM videos WHERE id=?').get(req.params.id);
+  if (!video) return res.status(404).json({ error: 'Video not found' });
+  const filePath = path.join(uploadDir, video.filename);
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ error: 'Video file missing on disk' });
+  }
+
+  const { spawnSync } = require('child_process');
+  const r = spawnSync('ffprobe', [
+    '-v', 'error',
+    '-show_format',
+    '-show_streams',
+    '-of', 'json',
+    filePath
+  ], { encoding: 'utf8', timeout: 30000 });
+
+  let probeData = null;
+  if (r.status === 0) {
+    try {
+      probeData = JSON.parse(r.stdout);
+    } catch (_) {}
+  }
+
+  let gopSeconds = null;
+  try {
+    gopSeconds = transcoder.measureGopSeconds(filePath);
+    if (gopSeconds !== video.gop_seconds) {
+      db.prepare('UPDATE videos SET gop_seconds=? WHERE id=?').run(gopSeconds, video.id);
+      video.gop_seconds = gopSeconds; // update local object to reflect correct data in response
+    }
+  } catch (_) {
+    gopSeconds = video.gop_seconds;
+  }
+
+  res.json({
+    video,
+    probe: probeData,
+    gopSeconds
+  });
+});
 
 // Stream a video file inline (for HTML5 <video> preview). Supports HTTP Range.
 // res.sendFile handles 206 Partial Content automatically.

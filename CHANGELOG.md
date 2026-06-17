@@ -7,6 +7,9 @@ Versi belum di-tag — pakai tanggal sebagai penanda release.
 
 ## [Unreleased]
 
+### Fixed — vnStat in Docker support
+- **Menambahkan paket `vnstat` ke dalam Dockerfile** dan memetakan database `vnstat` dari host VPS (`/var/lib/vnstat`) ke dalam container secara read-only agar statistik bandwidth bulanan dapat dibaca saat dijalankan via Docker.
+
 ### Changed — Loop tool UX
 - **Form Loop dirapikan jadi builder dua kolom** — pilihan video, durasi, title, mode, audio overlay, dan preview sumber sekarang lebih mudah discan.
 - **Loop form sekarang menampilkan thumbnail video sumber** dan estimasi loop secara ringkas.
