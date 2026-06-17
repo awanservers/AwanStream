@@ -453,6 +453,9 @@ function remove(audioId) {
   const track = db.prepare('SELECT * FROM audio_tracks WHERE id=?').get(id);
   if (!track) return { ok: false, error: 'Track not found' };
 
+  // Cancel active job if running.
+  cancel(id);
+
   // Check if any running stream uses this audio.
   const inUse = db.prepare(`
     SELECT id, name FROM streams WHERE audio_id=? AND status='running' LIMIT 1
